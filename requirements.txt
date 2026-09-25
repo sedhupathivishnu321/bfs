@@ -1,0 +1,17 @@
+# CPU-only environment used for all reported numbers (Python 3.11)
+torch==2.14.0      # PyPI wheel, run on CPU (no CUDA libs installed)
+torchvision
+timm==1.0.30
+numpy==2.4.6
+pandas==3.0.6
+scikit-learn==1.9.1
+scipy
+pydicom==3.0.2
+pylibjpeg
+pylibjpeg-libjpeg
+pylibjpeg-openjpeg
+python-gdcm
+opencv-python-headless
+requests
+remotezip
+matplotlib
