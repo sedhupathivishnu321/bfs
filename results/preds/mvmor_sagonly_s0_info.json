@@ -1,0 +1,19 @@
+{
+ "model": "mvmor",
+ "tag": "_sagonly",
+ "seed": 0,
+ "params": 345743,
+ "train_seconds": 6615.179617404938,
+ "epochs": 10,
+ "lr": 0.0005,
+ "wd": 0.05,
+ "bs": 32,
+ "planes": "Sagittal",
+ "folds": [
+  0,
+  1,
+  2,
+  3,
+  4
+ ]
+}

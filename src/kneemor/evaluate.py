@@ -146,6 +146,23 @@ def main():
             r.update(oof_diff_vs_ref=d, oof_diff_p=p)
         ci_rows.append(r)
     df = df.merge(pd.DataFrame(ci_rows), on="model")
+
+    # like-for-like: seed-0 run of every model vs seed-0 run of the reference (ablations have 1 seed)
+    s0_rows = []
+    if a.ref in runs and 0 in runs[a.ref]:
+        ra = runs[a.ref][0]
+        for name, seeds in runs.items():
+            if name == a.ref or 0 not in seeds or np.isnan(seeds[0]["oof"]).any():
+                continue
+            rb = seeds[0]
+            gd, gci, gp = paired_bootstrap(Yg, ra["gold"], rb["gold"], n=a.nboot)
+            od, oci, op = paired_bootstrap(ys, ra["oof"], rb["oof"], vs, n=max(200, a.nboot // 5))
+            s0_rows.append(dict(model=name, ref=a.ref, oof_auc_ref=macro_auc(ys, ra["oof"], vs)[0],
+                                oof_auc=macro_auc(ys, rb["oof"], vs)[0], oof_diff=od, oof_ci_lo=oci[0],
+                                oof_ci_hi=oci[1], oof_p=op, gold_auc_ref=macro_auc(Yg, ra["gold"])[0],
+                                gold_auc=macro_auc(Yg, rb["gold"])[0], gold_diff=gd, gold_ci_lo=gci[0],
+                                gold_ci_hi=gci[1], gold_p=gp))
+        pd.DataFrame(s0_rows).to_csv(os.path.join(a.res, "paired_seed0_vs_ref.csv"), index=False)
     df.to_csv(os.path.join(a.res, "summary.csv"), index=False)
     pd.concat(per_label, axis=1).T.to_csv(os.path.join(a.res, "per_label_auc.csv"))
     pd.concat(thr_rows).to_csv(os.path.join(a.res, "gold_threshold_metrics.csv"))

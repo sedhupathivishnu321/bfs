@@ -1,0 +1,64 @@
+{
+ "mvmor": {
+  "params": 345743,
+  "gflops": 0.127033344,
+  "latency_ms_median": 12.698021997493925,
+  "latency_ms_p90": 13.417375402059406
+ },
+ "mvmor_norouting": {
+  "params": 345356,
+  "gflops": 0.17399808,
+  "latency_ms_median": 17.551937002281193,
+  "latency_ms_p90": 18.20344130101148
+ },
+ "mvmor_r1": {
+  "params": 345485,
+  "gflops": 0.098574336,
+  "latency_ms_median": 10.974343000270892,
+  "latency_ms_p90": 11.465867098013405
+ },
+ "mvmor_meandec": {
+  "params": 211727,
+  "gflops": 0.10403328,
+  "latency_ms_median": 11.11889049934689,
+  "latency_ms_p90": 11.666052498912904
+ },
+ "mvmor_noplane": {
+  "params": 345359,
+  "gflops": 0.127033344,
+  "latency_ms_median": 15.678003495850135,
+  "latency_ms_p90": 16.375454098306363
+ },
+ "mvmor_unshared": {
+  "params": 610703,
+  "gflops": 0.127033344,
+  "latency_ms_median": 21.08917799705523,
+  "latency_ms_p90": 30.85979879979277
+ },
+ "transformer": {
+  "params": 610316,
+  "gflops": 0.17399808,
+  "latency_ms_median": 19.614353997894796,
+  "latency_ms_p90": 28.04981370209135
+ },
+ "abmil": {
+  "params": 112920,
+  "gflops": 0.058392576,
+  "latency_ms_median": 1.5230339995468967,
+  "latency_ms_p90": 5.6216596021840815
+ },
+ "meanmlp": {
+  "params": 399628,
+  "gflops": 0.000792576,
+  "latency_ms_median": 0.3943580013583414,
+  "latency_ms_p90": 0.9500579988525772
+ },
+ "backbone_resnet18_72slices": {
+  "params": 11176512,
+  "gflops": 133.2412416,
+  "latency_ms_median": 2526.9226180025726,
+  "latency_ms_p90": 2646.7647151992423
+ },
+ "peak_rss_mb": 1054.84375,
+ "threads": 1
+}
