@@ -1,0 +1,19 @@
+{
+ "model": "meanmlp",
+ "tag": "",
+ "seed": 1,
+ "params": 399628,
+ "train_seconds": 299.7675724029541,
+ "epochs": 10,
+ "lr": 0.001,
+ "wd": 0.05,
+ "bs": 32,
+ "planes": "Sagittal,Coronal,Axial",
+ "folds": [
+  0,
+  1,
+  2,
+  3,
+  4
+ ]
+}

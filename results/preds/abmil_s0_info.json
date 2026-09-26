@@ -1,0 +1,19 @@
+{
+ "model": "abmil",
+ "tag": "",
+ "seed": 0,
+ "params": 112920,
+ "train_seconds": 971.3733396530151,
+ "epochs": 10,
+ "lr": 0.001,
+ "wd": 0.05,
+ "bs": 32,
+ "planes": "Sagittal,Coronal,Axial",
+ "folds": [
+  0,
+  1,
+  2,
+  3,
+  4
+ ]
+}

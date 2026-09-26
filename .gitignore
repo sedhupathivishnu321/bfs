@@ -4,3 +4,5 @@ results/models/
 *.npz
 *.pth
 *.pt
+results/preds/pool_labels.npy
+results/preds/gold_labels.npy

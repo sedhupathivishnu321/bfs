@@ -1,0 +1,19 @@
+{
+ "model": "mvmor_noplane",
+ "tag": "",
+ "seed": 0,
+ "params": 345359,
+ "train_seconds": 6197.714824438095,
+ "epochs": 10,
+ "lr": 0.0005,
+ "wd": 0.05,
+ "bs": 32,
+ "planes": "Sagittal,Coronal,Axial",
+ "folds": [
+  0,
+  1,
+  2,
+  3,
+  4
+ ]
+}

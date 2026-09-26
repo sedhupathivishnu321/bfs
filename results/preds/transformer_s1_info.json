@@ -1,0 +1,19 @@
+{
+ "model": "transformer",
+ "tag": "",
+ "seed": 1,
+ "params": 610316,
+ "train_seconds": 10949.114513874054,
+ "epochs": 10,
+ "lr": 0.0005,
+ "wd": 0.05,
+ "bs": 32,
+ "planes": "Sagittal,Coronal,Axial",
+ "folds": [
+  0,
+  1,
+  2,
+  3,
+  4
+ ]
+}
