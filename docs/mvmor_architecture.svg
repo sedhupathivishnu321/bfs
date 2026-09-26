@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 330" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="900" height="330" fill="#ffffff"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
+    </marker>
+  </defs>
+  <!-- inputs -->
+  <g fill="#e8f0fb" stroke="#3b6db3">
+    <rect x="15" y="40" width="120" height="40" rx="6"/>
+    <rect x="15" y="100" width="120" height="40" rx="6"/>
+    <rect x="15" y="160" width="120" height="40" rx="6"/>
+  </g>
+  <g text-anchor="middle" fill="#1b2b44">
+    <text x="75" y="58">Sagittal FS</text><text x="75" y="73" font-size="11">24 slices</text>
+    <text x="75" y="118">Coronal FS</text><text x="75" y="133" font-size="11">24 slices</text>
+    <text x="75" y="178">Axial FS</text><text x="75" y="193" font-size="11">24 slices</text>
+  </g>
+  <!-- backbone -->
+  <rect x="165" y="60" width="130" height="120" rx="6" fill="#f2f2f2" stroke="#777"/>
+  <text x="230" y="100" text-anchor="middle">Frozen</text>
+  <text x="230" y="117" text-anchor="middle">ResNet-18</text>
+  <text x="230" y="134" text-anchor="middle" font-size="11">per slice, 2×2 pool</text>
+  <text x="230" y="150" text-anchor="middle" font-size="11">288 tokens × 512</text>
+  <path d="M135,60 L165,100 M135,120 L165,120 M135,180 L165,140" stroke="#444" fill="none" marker-end="url(#a)"/>
+  <!-- tokenizer -->
+  <rect x="320" y="70" width="120" height="100" rx="6" fill="#fff5e0" stroke="#c98a00"/>
+  <text x="380" y="100" text-anchor="middle">Tokenizer</text>
+  <text x="380" y="118" text-anchor="middle" font-size="11">LN + Linear → d=128</text>
+  <text x="380" y="134" text-anchor="middle" font-size="11">+ plane / slice / cell</text>
+  <text x="380" y="148" text-anchor="middle" font-size="11">embeddings</text>
+  <path d="M295,120 L320,120" stroke="#444" marker-end="url(#a)"/>
+  <!-- recursion -->
+  <rect x="465" y="30" width="220" height="190" rx="8" fill="#eaf7ea" stroke="#2f8a3a"/>
+  <text x="575" y="52" text-anchor="middle" font-weight="bold">Shared block × R=3 (MoR)</text>
+  <rect x="490" y="65" width="170" height="36" rx="5" fill="#ffffff" stroke="#2f8a3a"/>
+  <text x="575" y="88" text-anchor="middle" font-size="12">r=1: router keeps 100% (288)</text>
+  <rect x="490" y="110" width="170" height="36" rx="5" fill="#ffffff" stroke="#2f8a3a"/>
+  <text x="575" y="133" text-anchor="middle" font-size="12">r=2: top 50% (144)</text>
+  <rect x="490" y="155" width="170" height="36" rx="5" fill="#ffffff" stroke="#2f8a3a"/>
+  <text x="575" y="178" text-anchor="middle" font-size="12">r=3: top 25% (72)</text>
+  <text x="575" y="210" text-anchor="middle" font-size="11">h ← h + σ(s)·f(h_sel); others exit early</text>
+  <path d="M440,120 L465,120" stroke="#444" marker-end="url(#a)"/>
+  <!-- decoder -->
+  <rect x="710" y="70" width="170" height="100" rx="6" fill="#f6ecfb" stroke="#8a3fb3"/>
+  <text x="795" y="98" text-anchor="middle">Label-query decoder</text>
+  <text x="795" y="116" text-anchor="middle" font-size="11">12 queries × cross-attn</text>
+  <text x="795" y="132" text-anchor="middle" font-size="11">+ FFN, group-wise linear</text>
+  <text x="795" y="152" text-anchor="middle" font-weight="bold">12 logits</text>
+  <path d="M685,120 L710,120" stroke="#444" marker-end="url(#a)"/>
+  <!-- footer -->
+  <text x="450" y="265" text-anchor="middle" font-size="12" fill="#333">Head: 345,743 parameters · 0.127 GFLOPs/study (measured) · weight sharing: parameters of ONE block for R recursions</text>
+  <text x="450" y="287" text-anchor="middle" font-size="12" fill="#333">Training targets: multilingual report-derived silver labels {0, 0.5, 1}; evaluation: 5-fold OOF + 58 expert-labelled gold studies</text>
+</svg>
