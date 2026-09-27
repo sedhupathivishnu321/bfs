@@ -20,6 +20,18 @@ jobs=(
  "--models mvmor_noplane --seeds 0 --lr 5e-4"
  "--models mvmor_unshared --seeds 0 --lr 5e-4"
  "--models mvmor --seeds 0 --lr 5e-4 --planes Sagittal --tag _sagonly"
+ # MV-MoRE (MoR + sparse top-k Mixture-of-Experts FFN) and its ablations, same protocol as MV-MoR above
+ "--models mvmore --seeds 0 --lr 5e-4 --save-models"
+ "--models mvmore --seeds 1 --lr 5e-4"
+ "--models mvmore --seeds 2 --lr 5e-4"
+ "--models mvmore_e2 --seeds 0 --lr 5e-4"
+ "--models mvmore_e8 --seeds 0 --lr 5e-4"
+ "--models mvmore_top1 --seeds 0 --lr 5e-4"
+ "--models mvmore_expdrop --seeds 0 --lr 5e-4"
+ "--models mvmore_unshared --seeds 0 --lr 5e-4"
+ "--models mvmore_nozloss --seeds 0 --lr 5e-4"
+ "--models mvmore_nobalance --seeds 0 --lr 5e-4"
+ "--models hybrid_more --seeds 0,1,2 --lr 5e-4 --save-models"
 )
 printf '%s\n' "${jobs[@]}" | xargs -P 4 -I{} sh -c \
   'n=$(echo "{}" | tr -c "a-z0-9_" "_" | cut -c1-80); python3 src/kneemor/train.py {} --epochs '"$E"' --threads 1 > '"$LOG"'/$n.log 2>&1'

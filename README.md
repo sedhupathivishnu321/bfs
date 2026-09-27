@@ -2,13 +2,28 @@
 
 > **Kaggle GPU notebook:** [`notebooks/rsna_knee_kaggle.ipynb`](notebooks/rsna_knee_kaggle.ipynb) is a
 > self-contained train, evaluate and submit pipeline:
-> * 2.5-D fine-tuned CNN with a hybrid global/label-query head;
+> * 2.5-D fine-tuned CNN with a global branch and a local branch (`CFG.HEAD_TYPE`: `"more"` — **MV-MoRE**,
+>   the proposed MoR + Mixture-of-Experts extension below, or `"transformer"`, the original head);
 > * rule labeler plus an optional LLM labeler, selected on the 58 expert studies;
 > * 5-fold CV, with expert-set AUC and accuracy measured;
 > * `submission.csv`.
 >
-> Rebuild it with `python notebooks/build_kaggle_notebook.py`. It was smoke-tested end-to-end on CPU in
-> both train and infer modes; no GPU scores have been measured yet.
+> Rebuild it with `python notebooks/build_kaggle_notebook.py`.
+>
+> **Measured on Kaggle GPU** (1 GPU, `HEAD_TYPE="transformer"` — the only head trained on GPU so far;
+> [`notebooks/rsna_knee_kaggle.executed.ipynb`](notebooks/rsna_knee_kaggle.executed.ipynb),
+> [`results/kaggle_gpu_run/`](results/kaggle_gpu_run/)):
+>
+> | | OOF macro AUC | Gold macro AUC [95% CI] | Gold accuracy (LOO thresholds) | Always-negative accuracy |
+> |---|---|---|---|---|
+> | 5-fold ensemble | **0.834** | **0.769** [0.715, 0.815] | **71.6%** | 65.5% |
+>
+> Fine-tuning the backbone end-to-end on GPU (vs. the frozen-ResNet-18 CPU study below) raised gold macro
+> AUC from ~0.70 to 0.769 — evidence that the backbone, not the head, was the larger lever, consistent with
+> this repo's own conclusions (§6). `HEAD_TYPE="more"` (MV-MoRE) has **not yet been run on GPU**; see
+> "Proposed extension: MV-MoRE" below for what it changes, why, and how to measure it. No claim in this
+> README guarantees a Kaggle leaderboard score: the hidden-test leaderboard is unmeasured (kaggle.com is
+> unreachable from the authoring container; §10).
 
 This is a reproducible, leakage-safe pipeline for the Kaggle competition
 [RSNA Knee Abnormality Detection](https://www.kaggle.com/competitions/rsna-knee-abnormality-detection).
@@ -52,6 +67,10 @@ slice tokens from all three MRI planes jointly:
 * **H2.** A weight-shared recursive block matches an unshared transformer of equal depth with fewer parameters.
 * **H3.** MoR token routing lowers FLOPs relative to full-depth recursion without losing AUC.
 * **H4.** Multi-plane input beats sagittal-only input.
+* **H5 (extension, not yet measured).** Replacing the block's FFN with a sparse top-k Mixture-of-Experts FFN
+  (**MV-MoRE**; "Proposed extension: MV-MoRE" below) raises AUC on the labels MV-MoR is weakest on
+  (small/focal structures: Medial Meniscus, MCL, Synovitis — §5.4, §5.6) more than on the labels it is
+  already strong on, at no significant FLOPs or latency cost.
 
 ## 2. Pipeline
 
@@ -139,6 +158,82 @@ slices and $G=4$ spatial cells, giving $T=288$ tokens; $d=128$.
 4. **Loss.** BCE against soft silver targets: 0.5 means "uncertain".
 
 The head has 345,743 parameters and runs at 0.127 GFLOPs per study (measured).
+
+### 3.1 Proposed extension: MV-MoRE (Mixture-of-Recursive-Experts)
+
+**Status: implemented and registered as `mvmore` / `hybrid_more` in `src/kneemor/models.py` and as
+`CFG.HEAD_TYPE="more"` in the Kaggle notebook; not yet trained.** The numbers below are computed from the
+architecture definition (parameter counts are exact arithmetic on `nn.Linear`/`nn.LayerNorm` shapes, the same
+method that reproduces MV-MoR's own measured 345,743 above to the digit); AUC, GFLOPs and latency are **not
+measured** in this session (no GPU and no `torch` install were available while writing this), and must be
+obtained by running `bash scripts/run_experiments.sh` (CPU ablation study) and by setting
+`CFG.HEAD_TYPE="more"` in the Kaggle notebook (GPU training). Treat every number in this subsection as a
+design target, not a result.
+
+**Motivation.** Both measured studies agree on where MV-MoR is weakest: on the CPU frozen-feature study,
+Medial Meniscus (0.59), Synovitis (0.58) and MCL (0.60) trail the strongest labels by 0.2–0.3 AUC (§5.4,
+§5.6); on the GPU fine-tuned run, the same three are again the bottom three (Synovitis 0.645, Medial Meniscus
+0.667, MCL/Lateral Meniscus ~0.728, against Baker's 0.906 and Medial OA 0.834 —
+[`results/kaggle_gpu_run/per_label.csv`](results/kaggle_gpu_run/per_label.csv)). A single shared FFN inside
+the MoR block must fit one function to both focal, small-structure evidence (meniscal/ligament tears) and
+diffuse, large-structure evidence (osteoarthritis, effusion) — exactly the tension the existing Hybrid head
+(§5.7) already exploits by *splitting into two branches*. MV-MoRE proposes the finer-grained version of the
+same idea *inside* the shared block, without hand-assigning which branch handles what: let a router learn it.
+
+**Design.**
+
+1. The MoR depth-routing loop (Tokenizer → recursive block → label-query decoder) is unchanged.
+2. The block's single feed-forward network is replaced by a sparse top-k Mixture-of-Experts FFN
+   (`MoEFFN`, adapting Shazeer et al. 2017 / Switch Transformer, Fedus et al. 2022):
+   $n$ small expert FFNs (default $n=4$) and a linear router; each token is dispatched to its `top_k`
+   (default 2) highest-scoring experts via boolean-mask gather (true sparse compute — an expert only ever
+   runs on the tokens routed to it, mirroring the gather/scatter pattern MV-MoR already uses for MoR depth
+   routing), and its output is the softmax-renormalised weighted sum of just those two experts' outputs.
+3. **Reliability, not just capacity** — two auxiliary losses, added to the task loss with small weights
+   (0.01, 0.001):
+   * a **switch-style load-balancing loss** (Fedus et al. 2022 / Mixtral) against the well-documented MoE
+     failure mode of routing collapse, where the router sends every token to one expert and the rest go
+     unused;
+   * an **ST-MoE router z-loss** (Zoph et al. 2022), which penalises large router logits — the paper's
+     documented cause of MoE training instability (NaNs, divergence).
+4. **No hard capacity-based token dropping.** Switch Transformer enforces a fixed per-expert capacity and
+   drops overflow tokens for hardware-friendly fixed-size batches on TPU pods. A knee study has only
+   ~60–600 tokens; dropping any of them for no hardware benefit here would be a needless accuracy cost, so
+   every token is served by its `top_k` experts regardless of how the batch happens to route.
+5. An **expert-dropout** ablation (`mvmore_expdrop`) randomly withholds one routed expert's contribution per
+   token during training, trading a little capacity for redundancy (no single expert becomes load-bearing).
+
+**Why this should not cost meaningful compute.** The image backbone accounts for ~99.9% of study-level FLOPs
+(§5.5, §5.8); the head is the wrong place to look for efficiency risk. Concretely, for the default config
+($d=128$, $\text{ffn}=256$, $n{=}4$ experts, top-2): the MoE-FFN's own FLOPs are $\text{top\_k}=2\times$ a
+single FFN's FLOPs (not $4\times$ — that is the point of sparse dispatch), i.e. **the FFN sub-cost of one
+block application roughly doubles; the attention sub-cost is unchanged**, so the head's total GFLOPs increase
+is well under 2×, itself under 2× of 0.127 GFLOPs — three to four orders of magnitude below the backbone.
+
+**Parameter accounting (exact, computed).**
+
+| | Params | vs. MV-MoR |
+|---|---|---|
+| MV-MoR (measured, §3) | 345,743 | – |
+| MV-MoRE, `mvmore` default (4 experts, top-2) | **544,019** | +198,276 (+57%), entirely in expert weights |
+| MV-MoR-H hybrid (measured, §5.7) | 745,383 | – |
+| MV-MoRE hybrid, `hybrid_more` | **943,659** | +198,276 (+27%) |
+
+**Ablations registered** (same one-factor-at-a-time discipline as the MV-MoR ablation table, §5.3):
+`mvmore_e2`/`mvmore_e8` (fewer/more experts), `mvmore_top1` (hard top-1, Switch-style), `mvmore_expdrop`
+(expert dropout), `mvmore_unshared` (routing+MoE with unshared weights, isolating H2's weight-sharing claim
+under MoE), `mvmore_nozloss`/`mvmore_nobalance` (remove one reliability loss at a time, to check it is
+earning its keep rather than just adding hyperparameters).
+
+**Design inspiration.** `multi_mor`, a general-purpose, N-dimensional, K-layer Mixture-of-Recursions library
+supplied as reference material for this task (not a public dependency; no URL is claimed here), independently
+arrived at several of the same primitives for its shared recursive block — RMSNorm/SwiGLU, LayerScale,
+stochastic depth, an expert-choice router with a switch-style auxiliary loss — which corroborates that they
+are reasonable defaults rather than idiosyncratic choices. It is not imported as a runtime dependency (this
+repository's models stay self-contained in `src/kneemor/models.py`, and the Kaggle notebook must remain a
+single file with no repo dependency at run time); its router/aux-loss formulation informed `MoEFFN`'s
+load-balancing loss above, and `docs/literature_review.md` §5 credits the underlying papers (Shazeer 2017,
+Fedus 2022, Zoph 2022, Jiang 2024) it in turn draws on.
 
 ## 4. Experimental protocol (identical for every model)
 
@@ -430,13 +525,43 @@ INT8 is available at inference as `infer.py --int8`. It calibrates on up to 8 te
 is unsupervised. Individual probabilities can shift (by up to 0.15 on the 3 demo studies), but ranking
 quality, and so AUC, was unchanged on gold.
 
-**Why 99% accuracy is not attainable here:**
-* the training labels agree with the expert standard at 0.735 AUC;
-* always predicting "negative" already scores 65.5%;
-* with n = 58, the 95% CI on gold AUC is about ±0.06.
+**Why 99% accuracy is not attainable here, and what the honest ceiling looks like.** This section exists
+because a 99%-accuracy target was requested for this task "at any cost." The request is taken seriously
+below: what would have to be true for 99% to be a real, non-leaked number, and what is actually achievable
+with more model capacity or more compute.
 
-Claims of 99% on this data would indicate leakage: evaluating on training data, predicting report-derived
-labels from the report text, or overlap between train and test.
+*Evidence, CPU frozen-feature study (§5):*
+* the *training labels themselves* agree with the expert standard at only 0.735 AUC (§2.1) — no image model
+  trained on them can be expected to exceed what its own supervision signal knows, and 0.735 AUC is nowhere
+  close to the discriminative power 99% accuracy on a 12-label, 16–60%-prevalence gold set would require;
+* always predicting "negative" already scores 65.5% accuracy on gold (§5.4) — the label distribution alone
+  sets a high floor that makes "accuracy" a poor headline metric here, which is exactly why AUC is the
+  competition's actual metric;
+* with $n=58$ gold studies, the 95% CI on gold AUC is about ±0.06–0.08 wide (§5, §7) — not enough studies to
+  distinguish "good" from "excellent" architectures, let alone certify a number to two nines of precision.
+
+*Evidence, GPU end-to-end fine-tuned study (this update, §3 box above):* fine-tuning a real CNN backbone
+end-to-end — the single largest lever this repo identifies (§6, §8) — raised gold macro AUC from ~0.70 to
+0.769 and LOO-threshold accuracy from 65.5% (floor) to 71.6%. That is a real, measured, non-trivial gain from
+the most expensive lever available (GPU + full fine-tuning), and it moved accuracy about a sixth of the way
+from the floor to 100%, not to 99%. It is evidence that the bottleneck is structural (label quality and gold-set
+size, per §6's "dominant bottleneck" conclusion), not merely under-parameterised heads — so **it does not
+support an expectation that more head capacity (MV-MoRE included) closes the remaining gap.**
+
+*What "at any cost" can and cannot buy:* more compute, a bigger backbone, MV-MoRE's extra expert capacity, an
+LLM labeler, and ensembling (§6's "practical recommendation") can plausibly push gold macro AUC further
+into, and perhaps somewhat past, the 0.735 labeler ceiling — because a stronger image model can sometimes
+out-perform the noisy text labels it was trained on, the way MV-MoR already slightly does (§2.1 vs §5.1). None
+of these levers can manufacture the ~4,350 missing expert labels, enlarge the 58-study gold set, or remove
+genuine diagnostic ambiguity in musculoskeletal MRI (real inter-reader disagreement exists in this kind of
+grading task even between expert radiologists). A reported 99% accuracy on this specific gold set would
+therefore be strong evidence of leakage — evaluating on training data, deriving predictions from the report
+text at test time (unavailable per §1), or train/test overlap — not evidence of a better model, and this
+repository will not report such a number without the measurement to back it. The honest, falsifiable target
+this update sets instead is: **beat the measured 0.769 gold macro AUC / 71.6% accuracy baseline via MV-MoRE,
+a stronger or ensembled backbone, and/or a better labeler, under the identical held-out-gold protocol already
+in place** — and to report whatever that measurement turns out to be, including a null result, exactly as
+§5.9(a)'s labeler-v2 negative result already was.
 
 ## 6. Conclusions (evidence-based)
 
@@ -468,6 +593,12 @@ labels from the report text, or overlap between train and test.
      nested CV;
   2. fine-tuning the slice encoder end-to-end on a GPU;
   3. finer spatial tokens for meniscus and ligaments.
+* **Update (this revision).** (2) is now measured (§3 box: gold AUC 0.769 on GPU, up from ~0.70). §3.1
+  proposes MV-MoRE as a further, not-yet-measured architectural lever aimed specifically at the weakest
+  labels identified across both studies (Medial Meniscus, MCL, Synovitis), and the Kaggle notebook's LLM
+  labeler path (1) was hardened (JSON-repair fallback, graceful skip on a missing `LLM_PATH`) but is still
+  off by default and unmeasured — turning it on and reporting its gold-set AUC next is the single item on
+  this list most likely to move the needle, per the labeler-vs-model comparison in §2.1 and §6.
 
 ## 7. Limitations
 
@@ -475,13 +606,23 @@ labels from the report text, or overlap between train and test.
   gold are statistically significant.
 * The silver labels are noisy and rule-based. Using the gold set to tune the labeler would bias the
   evaluation, so it was not done.
-* The backbone is frozen, ImageNet-pretrained, 2-D, at 160 px with 2×2 pooling. End-to-end training was out
-  of reach on CPU.
+* In the CPU study (§2–§7), the backbone is frozen, ImageNet-pretrained, 2-D, at 160 px with 2×2 pooling;
+  end-to-end training was out of reach on CPU. The Kaggle GPU notebook fine-tunes the backbone end-to-end
+  instead (§3 box), but has so far only been run once, with the original `HEAD_TYPE="transformer"` head.
 * One series per plane was used (the best fluid-sensitive one), so T1 and other sequences are ignored.
 * Epoch count and learning rate were fixed from a single pilot split, and the ablations use one seed.
 * Latencies were measured under concurrent load.
 * The hidden-test leaderboard score was not measured.
 * "Bulgarian" reports are tagged `ru` in the code because the language heuristic matched Cyrillic.
+* **MV-MoRE (§3.1) is implemented but unexecuted in this update.** The environment used to write it had
+  no GPU and no working `torch` install (PyPI's CPU-only wheel index was network-blocked; the default index
+  resolves a multi-GB CUDA-toolkit install that was not worth pulling just to validate a head-only module).
+  It was checked by: (a) syntax-compiling every notebook cell and the modified `.py` files, (b) hand-deriving
+  its parameter count with the same arithmetic that exactly reproduces MV-MoR's own measured 345,743, and
+  (c) mirroring the already-measured MV-MoR's gather/scatter routing pattern line-for-line rather than
+  writing new dispatch logic. None of that substitutes for actually running it; do that first, via
+  `bash scripts/run_experiments.sh` and/or the Kaggle notebook with `HEAD_TYPE="more"`, before trusting any
+  AUC, FLOPs or latency number for `mvmore` / `hybrid_more`.
 
 ## 8. Reproduce
 
@@ -509,6 +650,9 @@ redistributed; `results/preds/*_labels.npy` are git-ignored.
 src/kneemor/ ingest.py  report_labeler.py  features.py  models.py  train.py  pilot.py
              baseline_lr.py  evaluate.py  efficiency.py  analysis.py  infer.py
 scripts/run_experiments.sh   docs/literature_review.md   results/ (all measured outputs)
+notebooks/rsna_knee_kaggle.ipynb            self-contained Kaggle GPU notebook (source: build_kaggle_notebook.py)
+notebooks/rsna_knee_kaggle.executed.ipynb   its one measured GPU run (HEAD_TYPE="transformer"; §3 box above)
+results/kaggle_gpu_run/                     that run's metrics.json / per_label.csv, extracted for grepping
 ```
 
 ## 10. Wall-clock cost of this study

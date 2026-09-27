@@ -17,7 +17,9 @@ from kneemor.features import build_backbone  # noqa: E402
 from kneemor.models import build, n_params  # noqa: E402
 
 HEADS = ["mvmor", "mvmor_norouting", "mvmor_r1", "mvmor_meandec", "mvmor_noplane", "mvmor_unshared",
-         "transformer", "abmil", "meanmlp"]
+         "transformer", "abmil", "meanmlp",
+         "mvmore", "mvmore_e2", "mvmore_e8", "mvmore_top1", "mvmore_expdrop", "mvmore_unshared",
+         "hybrid_more"]
 
 
 def flops(fn):

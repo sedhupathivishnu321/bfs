@@ -32,9 +32,18 @@ This is a self-contained Kaggle notebook: turn on a **GPU** (T4×2 or P100) and 
 3. **Model: 2.5-D hybrid.**
    * An ImageNet-pretrained timm CNN runs on 3 adjacent slices as RGB and is **fine-tuned end-to-end**.
    * A **global branch** (per-plane mean → linear) feeds the output directly.
-   * A **local branch** (2-layer transformer over all slice tokens of all planes, then 12 label queries
-     with cross-attention) feeds it too.
-   * Each branch has its own auxiliary loss.
+   * A **local branch** mixes all slice tokens of all planes, then 12 label queries cross-attend to them.
+     `CFG.HEAD_TYPE` picks the mixer:
+     * `"more"` (**default, proposed**) — **MV-MoRE**: one attention+FFN block, weight-shared and applied
+       up to `MOR_RECURSIONS` times with MoR expert-choice depth routing (Bae et al., 2025), whose FFN is a
+       sparse top-k Mixture-of-Experts (`MOE_EXPERTS` experts, `MOE_TOPK` active per token; Shazeer 2017 /
+       Switch, Fedus 2022 / ST-MoE router z-loss, Zoph 2022) for label-specialised capacity at near-zero
+       extra FLOPs relative to the CNN backbone.
+     * `"transformer"` — the original 2-layer unshared transformer. This is the architecture that produced
+       the measured gold macro AUC 0.769 / OOF 0.834 result in `results/kaggle_gpu_run/`; set
+       `CFG.HEAD_TYPE = "transformer"` to reproduce it exactly, or leave `"more"` to test the proposed
+       extension (not yet measured on GPU — see README "Proposed extension: MV-MoRE").
+   * Each branch has its own auxiliary loss (plus the MoE load-balance/z-loss when `HEAD_TYPE="more"`).
 4. **Training.** 5-fold CV on the report-labelled studies with AMP, a cosine schedule and soft BCE. The 58
    expert-labelled studies are **held out** and used only for evaluation.
 5. **Evaluation.** OOF macro AUC; expert-set macro AUC with a bootstrap CI; expert-set **accuracy** with
@@ -74,6 +83,12 @@ class CFG:
     BACKBONE = "tf_efficientnet_b0.ns_jft_in1k"         # alternatives: "convnext_nano.in12k_ft_in1k", "resnet34.a1_in1k"
     PRETRAINED = True              # needs internet in MODE="train"
     D_MODEL = 256
+    HEAD_TYPE = "more"             # "more" (MV-MoRE: shared recursive block + sparse top-k MoE FFN, proposed)
+                                    # | "transformer" (original 2-layer unshared transformer, kept for comparison:
+                                    #   this is what results/../metrics.json with HEAD_TYPE="transformer" measured)
+    MOR_RECURSIONS = 3             # MoR: max weight-shared recursions per token (expert-choice depth routing)
+    MOE_EXPERTS = 4                # MoE: experts in the shared block's FFN
+    MOE_TOPK = 2                   # MoE: experts each token is dispatched to (sparse, no capacity dropping)
     # training
     FOLDS = 5
     TRAIN_FOLDS = [0, 1, 2, 3, 4]  # subset to save time, e.g. [0]
@@ -174,10 +189,38 @@ Keys: "ACL","MCL","Medial Meniscus","Lateral Meniscus","Medial OA","Lateral OA",
 REPORT:
 '''
 
+import re
+
+def parse_llm_json(txt):
+    '''Strict JSON first; on failure, fall back to regex "key": value pairs so a model that
+    emits near-JSON (trailing commas, stray text, a missing brace) still contributes labels
+    instead of the whole study silently falling back to the rule labeler.'''
+    try:
+        js = json.loads(txt[txt.index("{"): txt.rindex("}") + 1])
+        return [float(js.get(k, np.nan)) for k in LABELS]
+    except Exception:
+        pass
+    out = {}
+    for k in LABELS:
+        m = re.search(re.escape(k) + r'"?\s*[:=]\s*"?(-?[0-9]*\.?[0-9]+)', txt)
+        if m:
+            try: out[k] = float(m.group(1))
+            except ValueError: pass
+    return [out.get(k, np.nan) for k in LABELS]
+
 def llm_label(reports):
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    tok = AutoTokenizer.from_pretrained(CFG.LLM_PATH, padding_side="left")
-    model = AutoModelForCausalLM.from_pretrained(CFG.LLM_PATH, torch_dtype=torch.float16, device_map="auto").eval()
+    '''Returns None (never raises) if the LLM cannot be loaded, so a bad LLM_PATH degrades
+    gracefully to the rule labeler instead of failing the whole training run.'''
+    if not CFG.LLM_PATH or not os.path.exists(CFG.LLM_PATH):
+        print(f"USE_LLM_LABELS=True but LLM_PATH not found ({CFG.LLM_PATH!r}); skipping LLM labels, using rules only.")
+        return None
+    try:
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        tok = AutoTokenizer.from_pretrained(CFG.LLM_PATH, padding_side="left")
+        model = AutoModelForCausalLM.from_pretrained(CFG.LLM_PATH, torch_dtype=torch.float16, device_map="auto").eval()
+    except Exception as e:
+        print(f"LLM load failed ({e!r}); skipping LLM labels, using rules only.")
+        return None
     out = np.full((len(reports), len(LABELS)), np.nan, np.float32)
     for i in range(0, len(reports), CFG.LLM_BATCH):
         chunk = reports[i:i + CFG.LLM_BATCH]
@@ -188,11 +231,9 @@ def llm_label(reports):
             gen = model.generate(**enc, max_new_tokens=160, do_sample=False)
         for j, g in enumerate(gen):
             txt = tok.decode(g[enc["input_ids"].shape[1]:], skip_special_tokens=True)
-            try:
-                js = json.loads(txt[txt.index("{"): txt.rindex("}") + 1])
-                out[i + j] = [float(js.get(k, np.nan)) for k in LABELS]
-            except Exception:
-                pass
+            vals = parse_llm_json(txt)
+            if not all(np.isnan(vals)):
+                out[i + j] = vals
         if i % (CFG.LLM_BATCH * 50) == 0: print(f"  LLM {i}/{len(reports)} {elapsed()}")
     del model; torch.cuda.empty_cache()
     return out
@@ -201,10 +242,11 @@ if CFG.MODE == "train":
     candidates = {"rules": rule}
     if CFG.USE_LLM_LABELS:
         llm = llm_label(train.Report.tolist())
-        ok = ~np.isnan(llm).any(1); print(f"LLM parsed {ok.mean():.1%} of reports")
-        llm = np.where(np.isnan(llm), rule, np.clip(llm, 0, 1))
-        candidates["llm"] = llm
-        candidates["llm+rules"] = (llm + rule) / 2
+        if llm is not None:
+            ok = ~np.isnan(llm).any(1); print(f"LLM parsed {ok.mean():.1%} of reports")
+            llm = np.where(np.isnan(llm), rule, np.clip(llm, 0, 1))
+            candidates["llm"] = llm
+            candidates["llm+rules"] = (llm + rule) / 2
     Yg = train.loc[gold_mask, LABELS].values.astype(int)
     scores = {k: macro_auc(Yg, v[gold_mask]) for k, v in candidates.items()}
     print("labeler macro AUC vs expert labels:", {k: round(v, 4) for k, v in scores.items()})
@@ -323,9 +365,92 @@ def gpu_augment(x):
     x = F.grid_sample(x.reshape(B * P, S, H, W), grid, align_corners=False, padding_mode="zeros")
     return x.reshape(B, P, S, H, W).clamp(0, 1)
 
+class MoEFFN(nn.Module):
+    '''Sparse top-k Mixture-of-Experts FFN (Shazeer 2017 / Switch, Fedus 2022 / ST-MoE, Zoph 2022).
+    Each token is dispatched to exactly top_k of n_experts small FFNs -- true sparse compute via
+    boolean-mask gather, not a dense weighted sum over all experts. No Switch-style fixed-capacity
+    token dropping: with only ~50-250 tokens/study here, dropping would cost accuracy for no
+    hardware-batching benefit. Exposes aux_loss (load-balancing) and z_loss (router-logit penalty,
+    the documented cause of MoE training instability) for the caller to add to the task loss.
+    Ported from src/kneemor/models.py MoEFFN so the notebook stays self-contained on Kaggle.'''
+    def __init__(self, d, ffn, drop, n_experts=4, top_k=2):
+        super().__init__()
+        assert 1 <= top_k <= n_experts
+        self.n_experts, self.top_k = n_experts, top_k
+        self.router = nn.Linear(d, n_experts)
+        self.experts = nn.ModuleList([nn.Sequential(nn.Linear(d, ffn), nn.GELU(), nn.Dropout(drop),
+                                                     nn.Linear(ffn, d)) for _ in range(n_experts)])
+        self.aux_loss = torch.zeros(()); self.z_loss = torch.zeros(())
+    def forward(self, x):
+        shape = x.shape; flat = x.reshape(-1, shape[-1])
+        logits = self.router(flat); probs = logits.softmax(-1)
+        topv, topi = probs.topk(self.top_k, dim=-1)
+        topv = topv / topv.sum(-1, keepdim=True).clamp_min(1e-9)
+        out = torch.zeros_like(flat)
+        for e, expert in enumerate(self.experts):
+            for slot in range(self.top_k):
+                sel = topi[:, slot] == e
+                if sel.any():
+                    out[sel] = out[sel] + topv[sel, slot:slot + 1] * expert(flat[sel])
+        importance = probs.mean(0)
+        frac = torch.stack([(topi == e).any(-1).float().mean() for e in range(self.n_experts)])
+        self.aux_loss = self.n_experts * (importance * frac).sum()          # switch load-balance loss
+        self.z_loss = (torch.logsumexp(logits, dim=-1) ** 2).mean()         # ST-MoE router z-loss
+        return out.reshape(shape)
+
+class MoREBlock(nn.Module):
+    '''Pre-norm attention + sparse MoE-FFN block; one instance is reused every recursion (MoR weight sharing).'''
+    def __init__(self, d, heads, ffn, drop, n_experts, top_k):
+        super().__init__()
+        self.n1, self.n2 = nn.LayerNorm(d), nn.LayerNorm(d)
+        self.attn = nn.MultiheadAttention(d, heads, dropout=drop, batch_first=True)
+        self.ffn = MoEFFN(d, ffn, drop, n_experts, top_k)
+        self.drop = nn.Dropout(drop)
+    def residual(self, h, pad):
+        x = self.n1(h)
+        a = self.attn(x, x, x, key_padding_mask=pad, need_weights=False)[0]
+        u = h + self.drop(a)
+        y = self.ffn(self.n2(u))
+        return u + self.drop(y) - h
+
+class MoRELocal(nn.Module):
+    '''MV-MoRE local mixer: one shared MoREBlock applied R times with MoR expert-choice depth
+    routing (Bae et al., 2025) -- replaces the plain unshared 2-layer transformer used for
+    HEAD_TYPE="transformer". Adds per-token Mixture-of-Experts capacity at near-zero extra FLOPs
+    relative to the CNN backbone (the backbone is 3-4 orders of magnitude larger in compute; see
+    README "Proposed extension: MV-MoRE"). aux_loss (load-balance + router z-loss, averaged over
+    the recursion steps run) is exposed for the training loop to add to the task loss.'''
+    def __init__(self, d, heads=4, ffn_mult=2, recursions=3, capacity=(1.0, 0.5, 0.25), n_experts=4, top_k=2, drop=0.1):
+        super().__init__()
+        self.block = MoREBlock(d, heads, ffn_mult * d, drop, n_experts, top_k)
+        self.R, self.capacity = recursions, list(capacity)
+        self.routers = nn.ModuleList([nn.Linear(d, 1) for _ in range(recursions)])
+        self.aux_loss = torch.zeros(())
+    def forward(self, h, pad):
+        B, T, d = h.shape
+        active = ~pad
+        moe_losses = []
+        for r in range(self.R):
+            score = self.routers[r](h).squeeze(-1)
+            k = max(1, min(T, math.ceil(self.capacity[r] * T)))
+            masked = score.masked_fill(~active, float("-inf"))
+            idx = masked.topk(k, dim=1).indices
+            sel_valid = torch.gather(active, 1, idx)
+            hs = torch.gather(h, 1, idx[..., None].expand(-1, -1, d))
+            g = torch.sigmoid(torch.gather(score, 1, idx)).unsqueeze(-1)
+            upd = self.block.residual(hs, ~sel_valid) * g * sel_valid.unsqueeze(-1).float()
+            moe_losses.append(0.01 * self.block.ffn.aux_loss + 0.001 * self.block.ffn.z_loss)
+            h = h.scatter_add(1, idx[..., None].expand(-1, -1, d), upd)
+            active = torch.zeros_like(active).scatter(1, idx, sel_valid)
+        self.aux_loss = torch.stack(moe_losses).mean()
+        return h
+
 class Knee25DHybrid(nn.Module):
-    '''2.5-D CNN (3 adjacent slices -> RGB) + global branch + local transformer/label-query branch.'''
-    def __init__(self, backbone, pretrained, P, S, d=256, n=12):
+    '''2.5-D CNN (3 adjacent slices -> RGB) + global branch + local mixer + label-query branch.
+    CFG.HEAD_TYPE picks the local mixer: "more" (MV-MoRE, proposed) or "transformer" (original
+    baseline, kept so the two are a true apples-to-apples ablation on identical tokens/training).'''
+    def __init__(self, backbone, pretrained, P, S, d=256, n=12, head_type="more",
+                 recursions=3, n_experts=4, top_k=2):
         super().__init__()
         self.enc = timm.create_model(backbone, pretrained=pretrained, num_classes=0, in_chans=3)
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
@@ -335,8 +460,12 @@ class Knee25DHybrid(nn.Module):
         self.proj = nn.Sequential(nn.LayerNorm(C), nn.Linear(C, d))
         self.plane = nn.Parameter(torch.zeros(P, 1, d)); self.pos = nn.Parameter(torch.zeros(P, S, d))
         nn.init.trunc_normal_(self.plane, std=0.02); nn.init.trunc_normal_(self.pos, std=0.02)
-        layer = nn.TransformerEncoderLayer(d, 4, 2 * d, 0.1, batch_first=True, norm_first=True)
-        self.mix = nn.TransformerEncoder(layer, 2)
+        self.head_type = head_type
+        if head_type == "more":
+            self.mix = MoRELocal(d, heads=4, ffn_mult=2, recursions=recursions, n_experts=n_experts, top_k=top_k, drop=0.1)
+        else:
+            layer = nn.TransformerEncoderLayer(d, 4, 2 * d, 0.1, batch_first=True, norm_first=True)
+            self.mix = nn.TransformerEncoder(layer, 2)
         self.q = nn.Parameter(torch.randn(n, d) * 0.02)
         self.xattn = nn.MultiheadAttention(d, 4, dropout=0.1, batch_first=True)
         self.nq, self.nk = nn.LayerNorm(d), nn.LayerNorm(d)
@@ -351,16 +480,23 @@ class Knee25DHybrid(nn.Module):
         zg = self.glob((f.mean(2) * mf).flatten(1))
         t = (self.proj(f) + self.plane + self.pos).reshape(B, P * S, -1)
         pad = (~m)[:, :, None].expand(B, P, S).reshape(B, P * S)
-        t = self.mix(t, src_key_padding_mask=pad)
+        if self.head_type == "more":
+            t = self.mix(t, pad)
+            moe_aux = self.mix.aux_loss.expand(B)          # [B]: DataParallel-safe (concatenable across GPUs)
+        else:
+            t = self.mix(t, src_key_padding_mask=pad)
+            moe_aux = torch.zeros(B, device=x.device)
         q = self.nq(self.q).unsqueeze(0).expand(B, -1, -1)
         a, _ = self.xattn(q, self.nk(t), self.nk(t), key_padding_mask=pad)
         zl = ((q + a) * self.w).sum(-1) + self.b
-        return 0.5 * (zg + zl), zg, zl
+        return 0.5 * (zg + zl), zg, zl, moe_aux
 
 def make_model(pretrained):
-    return Knee25DHybrid(CFG.BACKBONE, pretrained, len(CFG.PLANES), CFG.SLICES, CFG.D_MODEL)
+    return Knee25DHybrid(CFG.BACKBONE, pretrained, len(CFG.PLANES), CFG.SLICES, CFG.D_MODEL,
+                         head_type=CFG.HEAD_TYPE, recursions=CFG.MOR_RECURSIONS,
+                         n_experts=CFG.MOE_EXPERTS, top_k=CFG.MOE_TOPK)
 
-_m = make_model(False); print(f"params: {sum(p.numel() for p in _m.parameters()) / 1e6:.2f} M"); del _m"""))
+_m = make_model(False); print(f"params: {sum(p.numel() for p in _m.parameters()) / 1e6:.2f} M | head_type: {CFG.HEAD_TYPE}"); del _m"""))
 
 C.append(md("## 5. 5-fold training (expert-labelled studies held out)"))
 C.append(code(r"""def run_epoch(model, loader, opt=None, sched=None, scaler=None):
@@ -371,11 +507,12 @@ C.append(code(r"""def run_epoch(model, loader, opt=None, sched=None, scaler=None
         if train: x = gpu_augment(x)
         with torch.autocast(device_type=DEVICE.type, dtype=torch.float16, enabled=CFG.AMP and DEVICE.type == "cuda"):
             with torch.set_grad_enabled(train):
-                z, zg, zl = model(x, m)
+                z, zg, zl, moe_aux = model(x, m)
         if train:
             y = b["y"].to(DEVICE)
             loss = F.binary_cross_entropy_with_logits(z.float(), y) + CFG.AUX_W * (
-                F.binary_cross_entropy_with_logits(zg.float(), y) + F.binary_cross_entropy_with_logits(zl.float(), y))
+                F.binary_cross_entropy_with_logits(zg.float(), y) + F.binary_cross_entropy_with_logits(zl.float(), y)
+            ) + moe_aux.float().mean()          # MoE load-balance + router z-loss (no-op, 0, for HEAD_TYPE="transformer")
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward(); scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)

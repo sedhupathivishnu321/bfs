@@ -47,7 +47,28 @@ from other papers were measured on other datasets and are **not** comparable to 
   depth for **multi-view medical volumes**. Such volumes are highly redundant: most of the 72 slices × 4
   cells per knee study are off-target anatomy.
 
-## 5. Efficiency toolbox considered
+## 5. Sparse Mixture-of-Experts
+
+* **Shazeer et al., *ICLR* 2017** introduced sparsely-gated MoE layers: a learned router sends each token to a
+  small top-k subset of expert FFNs, giving conditional capacity at near-constant FLOPs.
+* **Switch Transformer** (Fedus et al., *JMLR* 2022) simplifies routing to top-1 and adds a load-balancing
+  auxiliary loss; it also introduces fixed per-expert **capacity** with token dropping when a expert overflows,
+  which trades some accuracy for hardware-friendly fixed-size batches on TPU pods.
+* **ST-MoE** (Zoph et al., 2022) documents MoE training instability (router-logit blow-up, dead experts) and
+  fixes it with a **router z-loss** that penalises large router logits, plus other stability recipes.
+* **Mixtral** (Jiang et al., 2024) shows sparse top-2 MoE at scale with strong quality/compute trade-offs, using
+  the same load-balancing loss form reused here.
+* Gap for this task: MoE is normally paired with **more data and larger models** to justify the extra
+  parameters. Here the labelled pool is small (4,349 silver + 58 gold studies) and per-study compute is
+  dominated by the image backbone (~99.9% of FLOPs, §5.5/§5.8 of the README), so the usual argument for MoE
+  (spend more FLOPs on more capacity) does not apply; the argument here is instead **spend near-zero extra
+  FLOPs on more head capacity**, since the head is <1M parameters and the backbone is unchanged. We also found
+  no prior study combining MoE's *expert*-axis routing with MoR's *depth*-axis routing for small-N, multi-view
+  medical volumes, nor one that measures whether Switch-style hard capacity dropping is worth its accuracy cost
+  when the token budget is only in the hundreds (as opposed to the millions of tokens per batch MoE is usually
+  evaluated on).
+
+## 6. Efficiency toolbox considered
 
 * Pruning, quantisation and distillation (Hinton et al., 2015) usually compress a large trained model
   *after the fact*.
@@ -55,7 +76,7 @@ from other papers were measured on other datasets and are **not** comparable to 
   and the frozen backbone dominates the compute (see `results/efficiency.json`). Whole-pipeline compression
   would therefore target the backbone; that is future work, see README §Limitations.
 
-## 6. Research gap addressed
+## 7. Research gap addressed
 
 1. **Label scarcity.** Only 58 of 4,407 training studies carry expert labels. We need a leakage-free
    weak-supervision route from multilingual reports to image labels, with its noise measured against the gold
@@ -64,10 +85,30 @@ from other papers were measured on other datasets and are **not** comparable to 
    several planes. Label-specific attention over tokens from all planes can.
 3. **Efficiency.** A per-study head should be very small, since only ~4k weakly-labelled studies exist, and
    its compute should scale sub-linearly with depth.
+4. **Expert specialisation at near-zero extra compute (this extension).** The measured GPU run
+   (`notebooks/rsna_knee_kaggle.executed.ipynb`) shows the weakest gold labels are the small/focal ones
+   (Medial Meniscus, MCL) next to strong diffuse ones (Medial OA, Effusion) -- exactly the kind of
+   heterogeneity a single shared FFN must compromise on. A sparse top-k Mixture-of-Experts FFN inside the
+   already-shared MoR block lets different recursion tokens specialise (e.g. focal-tear vs. diffuse-OA
+   evidence) without adding an unshared block per specialisation and without materially changing FLOPs,
+   since the backbone dominates compute. §5 above is the gap this closes: MoE for capacity under a fixed,
+   tiny compute and data budget, not MoE for scale.
 
 **Hypothesis.** A single weight-shared transformer block applied recursively over joint multi-plane slice
 tokens, with MoR token routing and label-query decoding (**MV-MoR**), will:
 
 * **H1** outperform view-agnostic pooling heads (mean-pool MLP, logistic regression, ABMIL) on macro AUC;
 * **H2** match an unshared transformer of equal depth with about 43% fewer parameters;
-* **H3** use fewer FLOPs than full-depth recursion without a significant loss in AUC.
+* **H3** use fewer FLOPs than full-depth recursion without a significant loss in AUC;
+* **H4** beat sagittal-only input, since ACL/OA/effusion evidence is not confined to one plane.
+
+**Extension hypothesis (MV-MoRE, this update).** Replacing the block's single FFN with a sparse top-k
+Mixture-of-Experts FFN, trained with a switch-style load-balancing loss and an ST-MoE router z-loss:
+
+* **H5** raises macro AUC on the labels the single-FFN MV-MoR is weakest on (focal/small structures: Medial
+  Meniscus, MCL, Synovitis) more than on labels it is already strong on (diffuse: Medial OA, Effusion),
+  consistent with experts specialising by finding type, **without** a statistically significant FLOPs or
+  latency increase relative to MV-MoR, since the head remains under 1M parameters against a backbone that is
+  three to four orders of magnitude larger in compute (README §5.5, §5.8). This is a **hypothesis to be
+  tested by `bash scripts/run_experiments.sh`** (models `mvmore*`, `hybrid_more`); it is not yet measured
+  (see README "Proposed extension: MV-MoRE").
