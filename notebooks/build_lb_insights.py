@@ -141,6 +141,33 @@ The printed outputs above supply the numbers.
    * (b) Fine-tune a 2.5-D CNN slice encoder on GPU.
    * (c) Keep the hybrid, or the mean-pool MLP, as the cheap aggregation head.
    * (d) Compress the backbone for the efficiency track."""),
+    md("""## 7. Follow-up experiments: better labels, honest accuracy, a cheaper backbone
+
+These were run after the leaderboard analysis, to act on its conclusions. All numbers are measured.
+Sources: `results/labeler_v2_gold_loo.csv` and `results/efficiency_v2.json`."""),
+    code("""lab = pd.read_csv('../results/labeler_v2_gold_loo.csv', index_col=0)
+lab[['ACL','MCL','Medial OA','PF OA','Effusion','Synovitis','macro']]"""),
+    code("""e2 = json.load(open('../results/efficiency_v2.json'))
+acc = e2.pop('accuracy')
+t = pd.DataFrame(e2).T
+base = 'fp32 · 24 sl · 160px'
+t['speedup_vs_fp32'] = (t.loc[base, 'backbone_latency_ms'] / t.backbone_latency_ms.astype(float)).round(2)
+t['auc_change'] = (t.gold_auc.astype(float) - t.loc[base, 'gold_auc']).round(4)
+print(f"Hybrid gold accuracy, leave-one-out thresholds: {acc['hybrid_loo_threshold_acc']:.3f}  "
+      f"vs always-negative {acc['all_negative_acc']:.3f}")
+t[['gold_auc','auc_change','backbone_gflops','backbone_latency_ms','speedup_vs_fp32','slices_encoded']]"""),
+    md("""**Reading the follow-ups:**
+
+* **Labeler v2 gives no overall gain.** Fitting a label-mapping model on only 58 gold reports lifts OA
+  sharply (Medial OA 0.69 → 0.90 leave-one-out) but loses on ligaments and synovitis. The macro AUC stays at
+  0.733 or below, against 0.735 for the rules. So v2 was *not* used for retraining.
+* **Honest accuracy is 72.0%** against 65.5% for always predicting "negative". Thresholds were fitted by
+  leave-one-out on gold.
+* **INT8 quantisation of the backbone is about 5× faster on CPU with no measurable AUC loss.** This is the
+  efficiency-track recommendation. Halving the slices halves the cost for about −0.01 AUC; 128 px costs
+  about −0.03 AUC.
+* **99% accuracy is not reachable** with these labels: the labels themselves only reach 0.735 AUC against
+  the expert standard."""),
 ]
 nb = nbf.v4.new_notebook(cells=cells)
 nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}

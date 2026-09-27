@@ -375,6 +375,59 @@ Hybrid seed 0 scores OOF 0.794 and gold 0.720. Each Δ is the hybrid's AUC minus
 * The analysis points to supervision quality and the image encoder as the gap. For efficiency, the backbone
   is the only lever that matters: it accounts for about 99.9% of FLOPs.
 
+### 5.9 Follow-ups prompted by the leaderboard analysis (measured)
+
+**(a) Gold-calibrated report labeler v2** ([`src/kneemor/labeler_v2.py`](src/kneemor/labeler_v2.py),
+[`results/labeler_v2_gold_loo.csv`](results/labeler_v2_gold_loo.csv)). Per-label logistic regressions map
+rule outputs, plus a priori evidence features (cartilage loss per compartment, osteophytes, marrow oedema,
+effusion size, meniscal degeneration, synovial terms, cysts), to the expert convention. They are evaluated
+by **leave-one-out over the 58 gold studies**.
+
+| Labeler | Medial OA | PF OA | ACL | Synovitis | **Macro** |
+|---|---|---|---|---|---|
+| v1 rules (no fitting) | 0.688 | 0.619 | 0.925 | 0.639 | **0.735** |
+| v2, rule outputs only | 0.831 | 0.734 | 0.908 | 0.546 | 0.712 |
+| v2, all features | 0.902 | 0.766 | 0.862 | 0.456 | 0.733 |
+| v2, anatomy-grouped features | 0.733 | 0.708 | 0.900 | 0.492 | 0.716 |
+
+This is a **negative result**. With 58 examples, calibration trades large OA gains for losses elsewhere,
+and no variant beats the rules on macro AUC. The two follow-up variants were designed after the first
+leave-one-out score was seen, so if anything they are optimistic. v2 labels were therefore **not** used to
+retrain the image model.
+
+**(b) Honest accuracy.** Per-label thresholds were fitted by leave-one-out on gold (fit on 57 studies, apply
+to the 58th). With them, the hybrid 3-seed ensemble reaches **72.0% accuracy**, against **65.5%** for always
+predicting "negative" ([`results/efficiency_v2.json`](results/efficiency_v2.json)).
+
+**(c) Backbone efficiency**, the only lever that matters at about 99.9% of FLOPs
+([`src/kneemor/efficiency_v2.py`](src/kneemor/efficiency_v2.py)). The hybrid seed-0 heads were kept fixed.
+The 58 gold studies were re-encoded, and latency was measured on CPU with 1 thread, per study.
+
+| Backbone variant | Gold AUC | ΔAUC | GFLOPs | Latency (ms) | Speed-up |
+|---|---|---|---|---|---|
+| fp32, 24 slices, 160 px (reference) | 0.720 | – | 133.2 | 2,295 | 1.0× |
+| fp32, 12 slices, 160 px | 0.711 | −0.010 | 66.6 | 994 | 2.3× |
+| fp32, 8 slices, 160 px | 0.707 | −0.014 | 44.4 | 654 | 3.5× |
+| fp32, 24 slices, 128 px | 0.690 | −0.031 | 85.3 | 1,379 | 1.7× |
+| **INT8 (PTQ), 24 slices, 160 px** | **0.729** | **+0.009** | ~133 (int8) | **459** | **5.0×** |
+| INT8, 12 slices, 128 px | 0.700 | −0.021 | ~43 (int8) | 165 | 13.9× |
+
+INT8 post-training quantisation (FX graph mode, fbgemm, calibrated on 20 non-gold studies) gives about 5×
+lower CPU latency with no AUC loss; the +0.009 is within noise. Fewer slices are the next cheapest
+trade-off; lower resolution hurts most.
+
+INT8 is available at inference as `infer.py --int8`. It calibrates on up to 8 test studies' *images*, which
+is unsupervised. Individual probabilities can shift (by up to 0.15 on the 3 demo studies), but ranking
+quality, and so AUC, was unchanged on gold.
+
+**Why 99% accuracy is not attainable here:**
+* the training labels agree with the expert standard at 0.735 AUC;
+* always predicting "negative" already scores 65.5%;
+* with n = 58, the 95% CI on gold AUC is about ±0.06.
+
+Claims of 99% on this data would indicate leakage: evaluating on training data, predicting report-derived
+labels from the report text, or overlap between train and test.
+
 ## 6. Conclusions (evidence-based)
 
 * **H1 (joint multi-view attention beats pooling): partly supported.**

@@ -1,0 +1,62 @@
+{
+ "fp32 \u00b7 24 sl \u00b7 160px": {
+  "gold_auc": 0.7204253973266378,
+  "backbone_gflops": 133.2412416,
+  "backbone_latency_ms": 2294.8600459999966,
+  "slices_encoded": 72
+ },
+ "fp32 \u00b7 12 sl \u00b7 160px": {
+  "gold_auc": 0.710684646556759,
+  "backbone_gflops": 66.6206208,
+  "backbone_latency_ms": 993.864574999975,
+  "slices_encoded": 36
+ },
+ "fp32 \u00b7 8 sl \u00b7 160px": {
+  "gold_auc": 0.7065857060225061,
+  "backbone_gflops": 44.4137472,
+  "backbone_latency_ms": 654.240480999988,
+  "slices_encoded": 24
+ },
+ "fp32 \u00b7 24 sl \u00b7 128px": {
+  "gold_auc": 0.68967407924438,
+  "backbone_gflops": 85.274394624,
+  "backbone_latency_ms": 1379.2244090000167,
+  "slices_encoded": 72
+ },
+ "fp32 \u00b7 12 sl \u00b7 128px": {
+  "gold_auc": 0.6905350447448781,
+  "backbone_gflops": 42.637197312,
+  "backbone_latency_ms": 613.347757999918,
+  "slices_encoded": 36
+ },
+ "int8 \u00b7 24 sl \u00b7 160px": {
+  "gold_auc": 0.7294941118659786,
+  "backbone_gflops": null,
+  "backbone_latency_ms": 458.7439379999978,
+  "slices_encoded": 72
+ },
+ "int8 \u00b7 12 sl \u00b7 128px": {
+  "gold_auc": 0.6998077044849778,
+  "backbone_gflops": null,
+  "backbone_latency_ms": 164.73049599994738,
+  "slices_encoded": 36
+ },
+ "accuracy": {
+  "hybrid_loo_threshold_acc": 0.7198275862068966,
+  "all_negative_acc": 0.6551724137931034,
+  "per_label": {
+   "ACL": 0.6207,
+   "MCL": 0.8448,
+   "Medial Meniscus": 0.6034,
+   "Lateral Meniscus": 0.6379,
+   "Medial OA": 0.8103,
+   "Lateral OA": 0.7586,
+   "PF OA": 0.7414,
+   "Effusion": 0.7241,
+   "Synovitis": 0.6034,
+   "Baker's": 0.8448,
+   "Contusion": 0.7759,
+   "Fracture": 0.6724
+  }
+ }
+}
