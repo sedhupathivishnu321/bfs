@@ -362,6 +362,19 @@ Hybrid seed 0 scores OOF 0.794 and gold 0.720. Each Δ is the hybrid's AUC minus
 * **Inference:** `python src/kneemor/infer.py --key hybrid_s0 ...`; the checkpoints are in
   `results/models/hybrid_s0_f*.pt`.
 
+### 5.8 Context: Efficiency-Prize leaderboard
+
+[`notebooks/efficiency_lb_insights.ipynb`](notebooks/efficiency_lb_insights.ipynb) was executed on
+`data/efficiency_lb_top100.csv`, which is parsed from the organisers' *Efficiency LB* notebook.
+
+* The top-100 public macro AUC is 0.916–0.958, with a median of 0.940.
+* Efficiency rank correlates with score at Spearman ρ = −0.56, but 29% of team pairs are inverted, so
+  runtime decides within the accuracy band.
+* Our best gold AUC (0.713) and OOF AUC (0.797) are 0.12–0.20 below the lowest top-100 score. These are
+  different test sets, so the comparison is indicative only.
+* The analysis points to supervision quality and the image encoder as the gap. For efficiency, the backbone
+  is the only lever that matters: it accounts for about 99.9% of FLOPs.
+
 ## 6. Conclusions (evidence-based)
 
 * **H1 (joint multi-view attention beats pooling): partly supported.**
