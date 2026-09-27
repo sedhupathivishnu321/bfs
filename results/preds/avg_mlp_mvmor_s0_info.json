@@ -1,0 +1,1 @@
+{"model": "avg_mlp_mvmor", "seed": 0, "params": 745371, "train_seconds": 0, "epochs": 10, "note": "post-hoc probability average of separately trained meanmlp and mvmor"}
