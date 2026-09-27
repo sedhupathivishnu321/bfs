@@ -111,6 +111,8 @@ def train_one(name, X, M, idx_tr, Y_tr, args, seed, planes=None):
                     m[m.sum(1) == 0] = planes
             x, m = augment(x, m)
             loss = F.binary_cross_entropy_with_logits(model(x, m), y)
+            if getattr(model, "aux_logits", None) is not None:  # deep supervision (hybrid head)
+                loss = loss + model.aux * sum(F.binary_cross_entropy_with_logits(z, y) for z in model.aux_logits)
             opt.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

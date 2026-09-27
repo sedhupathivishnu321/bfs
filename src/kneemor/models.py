@@ -180,7 +180,47 @@ class ABMIL(nn.Module):
         return (z * self.cls).sum(-1) + self.b
 
 
+class HybridMVMoR(nn.Module):
+    """Hybrid global-local head (MV-MoR-H).
+
+    Motivation (measured in results/): the per-plane mean-pool MLP is the strongest
+    head on OOF AUC, while token attention (MV-MoR) is competitive on gold and on
+    localised labels. The two capture different evidence:
+        global branch  z_g = MLP([mean_{d,g} x_p]_{p=1..3})      diffuse findings (effusion, OA)
+        local branch   z_l = MV-MoR(x)                             focal findings (tears, cysts)
+    Fusion is a learned per-label convex gate on the logits:
+        z = a * z_g + (1 - a) * z_l,  a = sigmoid(g_label)  (initialised 0.5)
+    so each label chooses its own mix and the gate is directly interpretable.
+    Deep supervision: during training each branch also gets its own BCE loss
+    (weight `aux`), which keeps both branches predictive instead of one branch
+    dominating through the gate.
+    """
+
+    def __init__(self, aux: float = 0.5, gate: bool = True, **kw):
+        super().__init__()
+        self.glob = MeanPoolMLP()
+        self.loc = MVMoR(**kw)
+        self.g = nn.Parameter(torch.zeros(N_LABELS), requires_grad=gate)
+        self.aux = aux
+        self.aux_logits = None
+
+    def alpha(self):
+        return torch.sigmoid(self.g)
+
+    def forward(self, x, plane_mask):
+        zg, zl = self.glob(x, plane_mask), self.loc(x, plane_mask)
+        a = self.alpha()
+        self.aux_logits = (zg, zl) if self.training and self.aux > 0 else None
+        return a * zg + (1 - a) * zl
+
+
 def build(name: str, **kw) -> nn.Module:
+    if name == "hybrid":
+        return HybridMVMoR(**kw)
+    if name == "hybrid_noaux":                      # ablation: no deep supervision
+        return HybridMVMoR(aux=0.0, **kw)
+    if name == "hybrid_fixedgate":                  # ablation: fixed 0.5/0.5 logit average, trained jointly
+        return HybridMVMoR(gate=False, **kw)
     presets = {
         # proposed
         "mvmor": dict(),
