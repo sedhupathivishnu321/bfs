@@ -29,21 +29,31 @@ This is a self-contained Kaggle notebook: turn on a **GPU** (T4×2 or P100) and 
 2. **Preprocessing.** For each plane (sagittal, coronal, axial) it takes the best fluid-sensitive series,
    sorts it along the slice normal, resamples it to `SLICES` slices at `IMG` px, and caches the volume as
    uint8.
-3. **Model: 2.5-D hybrid.**
+3. **Model: 2.5-D hybrid.** Four independent CFG toggles turn this into a controlled ablation matrix
+   rather than one fixed design (see the CFG cell for the E0..E5 mapping and each toggle's rationale);
+   every default below is the proposed setting, and every alternative is the original pipeline that
+   produced the one measured GPU result so far (`results/kaggle_gpu_run/`: gold macro AUC 0.769, OOF 0.834).
    * An ImageNet-pretrained timm CNN runs on 3 adjacent slices as RGB and is **fine-tuned end-to-end**.
-   * A **global branch** (per-plane mean → linear) feeds the output directly.
-   * A **local branch** mixes all slice tokens of all planes, then 12 label queries cross-attend to them.
-     `CFG.HEAD_TYPE` picks the mixer:
-     * `"more"` (**default, proposed**) — **MV-MoRE**: one attention+FFN block, weight-shared and applied
-       up to `MOR_RECURSIONS` times with MoR expert-choice depth routing (Bae et al., 2025), whose FFN is a
-       sparse top-k Mixture-of-Experts (`MOE_EXPERTS` experts, `MOE_TOPK` active per token; Shazeer 2017 /
-       Switch, Fedus 2022 / ST-MoE router z-loss, Zoph 2022) for label-specialised capacity at near-zero
-       extra FLOPs relative to the CNN backbone.
-     * `"transformer"` — the original 2-layer unshared transformer. This is the architecture that produced
-       the measured gold macro AUC 0.769 / OOF 0.834 result in `results/kaggle_gpu_run/`; set
-       `CFG.HEAD_TYPE = "transformer"` to reproduce it exactly, or leave `"more"` to test the proposed
-       extension (not yet measured on GPU — see README "Proposed extension: MV-MoRE").
-   * Each branch has its own auxiliary loss (plus the MoE load-balance/z-loss when `HEAD_TYPE="more"`).
+     It only ever runs on planes actually present (`CFG` has no toggle for this — missing-plane rows are
+     gathered out before the CNN call unconditionally, since there is no case where running it on an
+     all-zero image is preferable).
+   * A **global branch** pools each plane's slice features (`CFG.POOLING`: `"attention"`, default —
+     learned per-slice weights, so a finding visible on 1-2 of `SLICES` slices isn't diluted by averaging
+     all of them; or `"mean"`, original) and feeds a linear layer.
+   * A **local branch** mixes all slice tokens of all planes (`CFG.HEAD_TYPE`: `"more"`, default —
+     **MV-MoRE**, one attention+FFN block, weight-shared and applied up to `MOR_RECURSIONS` times with MoR
+     expert-choice depth routing (Bae et al., 2025), whose FFN is a sparse top-k Mixture-of-Experts
+     (`MOE_EXPERTS` experts, `MOE_TOPK` active per token; Shazeer 2017 / Switch, Fedus 2022 / ST-MoE router
+     z-loss, Zoph 2022) for label-specialised capacity at near-zero extra FLOPs relative to the CNN
+     backbone; or `"transformer"`, the original 2-layer unshared transformer), then 12 label queries
+     cross-attend to the mixed tokens and a readout turns each query into a logit (`CFG.READOUT`:
+     `"shared_mlp"`, default — one small MLP shared across all 12 labels; or `"linear"`, original — each
+     label only owns a bilinear map with no cross-label sharing).
+   * Fusion of the two branches (`CFG.FUSION`: `"learned"`, default — a per-label sigmoid gate, mirroring
+     `src/kneemor/models.py`'s already-tested `HybridMVMoR` gate; or `"fixed"`, original — always
+     0.5×global + 0.5×local for every label regardless of how informative each branch is for it).
+   * Each branch has its own auxiliary loss (plus the MoE load-balance/z-loss when `HEAD_TYPE="more"`, and
+     optional per-label class-balancing, `CFG.LOSS_BALANCE`).
 4. **Training.** 5-fold CV on the report-labelled studies with AMP, a cosine schedule and soft BCE. The 58
    expert-labelled studies are **held out** and used only for evaluation.
 5. **Evaluation.** OOF macro AUC; expert-set macro AUC with a bootstrap CI; expert-set **accuracy** with
@@ -83,12 +93,29 @@ class CFG:
     BACKBONE = "tf_efficientnet_b0.ns_jft_in1k"         # alternatives: "convnext_nano.in12k_ft_in1k", "resnet34.a1_in1k"
     PRETRAINED = True              # needs internet in MODE="train"
     D_MODEL = 256
+    # Four orthogonal ablation toggles (a reviewer's controlled E0..E5 matrix reduces to picking
+    # these four independently; see the table further down this cell). Defaults are the proposed
+    # setting; the alternative named in each comment is the original pipeline, kept exactly so it
+    # is still reproducible for a like-for-like comparison.
     HEAD_TYPE = "more"             # "more" (MV-MoRE: shared recursive block + sparse top-k MoE FFN, proposed)
-                                    # | "transformer" (original 2-layer unshared transformer, kept for comparison:
-                                    #   this is what results/../metrics.json with HEAD_TYPE="transformer" measured)
+                                    # | "transformer" (original 2-layer unshared transformer; this is what
+                                    #   results/kaggle_gpu_run/metrics.json measured)
+    POOLING = "attention"          # "attention" (learned, proposed) | "mean" (original global-branch pooling:
+                                    #   dilutes a finding visible on 1-2 of SLICES slices by averaging all of them)
+    READOUT = "shared_mlp"         # "shared_mlp" (proposed: one small MLP shared by all 12 labels)
+                                    # | "linear" (original: each label only owns a bilinear (q+a)*w+b map)
+    FUSION = "learned"             # "learned" (proposed: per-label sigmoid gate, mirrors kneemor's HybridMVMoR)
+                                    # | "fixed" (original: always 0.5*global + 0.5*local for every label)
+    LOSS_BALANCE = True            # per-label pos_weight from training-pool prevalence (helps rare labels)
     MOR_RECURSIONS = 3             # MoR: max weight-shared recursions per token (expert-choice depth routing)
     MOE_EXPERTS = 4                # MoE: experts in the shared block's FFN
     MOE_TOPK = 2                   # MoE: experts each token is dispatched to (sparse, no capacity dropping)
+    # E0 (all-original) reviewer baseline = HEAD_TYPE="transformer", POOLING="mean", READOUT="linear",
+    # FUSION="fixed" (also set LOSS_BALANCE=False to match the originally-measured 0.769 gold AUC run
+    # exactly). E1 flips only HEAD_TYPE; E2 additionally flips POOLING; E3 additionally flips READOUT;
+    # E4 additionally flips FUSION (= this file's defaults with HEAD_TYPE="transformer"); E5 is this
+    # file's defaults (all four proposed). Change one flag at a time and diff metrics.json against
+    # results/kaggle_gpu_run/metrics.json (E0) to attribute any change to a single cause.
     # training
     FOLDS = 5
     TRAIN_FOLDS = [0, 1, 2, 3, 4]  # subset to save time, e.g. [0]
@@ -121,7 +148,6 @@ C.append(code(r"""import numpy as np, pandas as pd, torch, torch.nn as nn, torch
 import cv2, pydicom, timm
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import StratifiedKFold
 
 def seed_all(s):
     random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
@@ -445,17 +471,49 @@ class MoRELocal(nn.Module):
         self.aux_loss = torch.stack(moe_losses).mean()
         return h
 
+class AttnPool(nn.Module):
+    '''Learned attention pooling over slices, per plane (CFG.POOLING="attention"). Replaces
+    mean-pooling for the global branch: mean-pooling divides a finding's signal by SLICES even
+    when it is visible on only 1-2 slices; a learned per-slice score lets the branch weight the
+    slices that actually show the finding. For a fully-masked plane, f is exactly zero for every
+    slice (see Knee25DHybrid.encode_planes), so any softmax weighting still sums to exactly zero
+    -- pooling change does not affect the missing-plane convention.'''
+    def __init__(self, C):
+        super().__init__()
+        self.score = nn.Linear(C, 1)
+    def forward(self, f):                        # f: B,P,S,C
+        a = self.score(f).squeeze(-1).softmax(-1)  # B,P,S
+        return (f * a.unsqueeze(-1)).sum(2)
+
+class SharedMLPReadout(nn.Module):
+    '''Shared nonlinear per-label readout (CFG.READOUT="shared_mlp"). The original bilinear
+    (q+a)*w+b gives each label only a linear map with no cross-label weight sharing; this applies
+    one small MLP identically to all 12 label-query outputs, which can share nonlinear structure
+    across labels while the query/attention step upstream still gives each label its own evidence.'''
+    def __init__(self, d):
+        super().__init__()
+        self.net = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1))
+    def forward(self, h):                        # h: B, n, d
+        return self.net(h).squeeze(-1)
+
 class Knee25DHybrid(nn.Module):
     '''2.5-D CNN (3 adjacent slices -> RGB) + global branch + local mixer + label-query branch.
-    CFG.HEAD_TYPE picks the local mixer: "more" (MV-MoRE, proposed) or "transformer" (original
-    baseline, kept so the two are a true apples-to-apples ablation on identical tokens/training).'''
+    Four orthogonal toggles (CFG.HEAD_TYPE / POOLING / READOUT / FUSION) turn this into an
+    ablation matrix rather than one fixed design; see the CFG cell for the E0..E5 mapping.
+    Missing planes never reach the CNN (see encode_planes): real compute is saved whenever plane
+    dropout (15% of training batches) or a naturally missing plane occurs, since the backbone is
+    ~99.9% of study-level FLOPs (README "Proposed extension: MV-MoRE").'''
     def __init__(self, backbone, pretrained, P, S, d=256, n=12, head_type="more",
-                 recursions=3, n_experts=4, top_k=2):
+                 recursions=3, n_experts=4, top_k=2, pooling="attention", readout="shared_mlp",
+                 fusion="learned"):
         super().__init__()
         self.enc = timm.create_model(backbone, pretrained=pretrained, num_classes=0, in_chans=3)
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1), persistent=False)
-        C = self.enc.num_features
+        self.C = self.enc.num_features
+        C = self.C
+        self.pooling = pooling
+        self.pool = AttnPool(C) if pooling == "attention" else None
         self.glob = nn.Sequential(nn.LayerNorm(P * C), nn.Dropout(0.2), nn.Linear(P * C, n))
         self.proj = nn.Sequential(nn.LayerNorm(C), nn.Linear(C, d))
         self.plane = nn.Parameter(torch.zeros(P, 1, d)); self.pos = nn.Parameter(torch.zeros(P, S, d))
@@ -469,15 +527,36 @@ class Knee25DHybrid(nn.Module):
         self.q = nn.Parameter(torch.randn(n, d) * 0.02)
         self.xattn = nn.MultiheadAttention(d, 4, dropout=0.1, batch_first=True)
         self.nq, self.nk = nn.LayerNorm(d), nn.LayerNorm(d)
-        self.w = nn.Parameter(torch.randn(n, d) * 0.02); self.b = nn.Parameter(torch.zeros(n))
+        self.readout_type = readout
+        if readout == "shared_mlp":
+            self.readout = SharedMLPReadout(d)
+        else:
+            self.w = nn.Parameter(torch.randn(n, d) * 0.02); self.b = nn.Parameter(torch.zeros(n))
+        self.fusion = fusion
+        if fusion == "learned":
+            self.fuse_gate = nn.Parameter(torch.zeros(n))   # sigmoid(0)=0.5 at init: starts identical to "fixed"
+
+    def encode_planes(self, x, m):
+        '''x: B,P,S,H,W in [0,1]; m: B,P bool. Returns f: B,P,S,C with exact zeros for masked
+        planes -- the CNN only ever runs on the (study, plane) rows where m is True.'''
+        B, P, S, H, W = x.shape
+        xp = torch.cat([x[:, :, :1], x, x[:, :, -1:]], 2)                 # replicate-pad slices
+        rgb = torch.stack([xp[:, :, i:i + S] for i in range(3)], 3)      # B,P,S,3,H,W
+        rgb_flat = rgb.reshape(B * P, S, 3, H, W)
+        mflat = m.reshape(B * P)
+        f_flat = rgb_flat.new_zeros(B * P, S, self.C)
+        if mflat.any():
+            sel = rgb_flat[mflat].reshape(-1, 3, H, W)
+            enc_out = self.enc((sel - self.mean) / self.std).float()
+            f_flat[mflat] = enc_out.view(-1, S, self.C)
+        return f_flat.view(B, P, S, self.C)
+
     def forward(self, x, m):                        # x: B,P,S,H,W in [0,1]; m: B,P bool
         B, P, S, H, W = x.shape
-        xp = torch.cat([x[:, :, :1], x, x[:, :, -1:]], 2)             # replicate-pad slices
-        rgb = torch.stack([xp[:, :, i:i + S] for i in range(3)], 3)  # B,P,S,3,H,W
-        f = self.enc((rgb.reshape(-1, 3, H, W) - self.mean) / self.std)      # B*P*S, C
-        f = f.float().view(B, P, S, -1)
+        f = self.encode_planes(x, m)
         mf = m[..., None].float()
-        zg = self.glob((f.mean(2) * mf).flatten(1))
+        pooled = self.pool(f) if self.pooling == "attention" else f.mean(2)
+        zg = self.glob((pooled * mf).flatten(1))
         t = (self.proj(f) + self.plane + self.pos).reshape(B, P * S, -1)
         pad = (~m)[:, :, None].expand(B, P, S).reshape(B, P * S)
         if self.head_type == "more":
@@ -488,20 +567,35 @@ class Knee25DHybrid(nn.Module):
             moe_aux = torch.zeros(B, device=x.device)
         q = self.nq(self.q).unsqueeze(0).expand(B, -1, -1)
         a, _ = self.xattn(q, self.nk(t), self.nk(t), key_padding_mask=pad)
-        zl = ((q + a) * self.w).sum(-1) + self.b
-        return 0.5 * (zg + zl), zg, zl, moe_aux
+        h = q + a
+        zl = self.readout(h) if self.readout_type == "shared_mlp" else (h * self.w).sum(-1) + self.b
+        if self.fusion == "learned":
+            g = torch.sigmoid(self.fuse_gate)
+            z = g * zg + (1 - g) * zl
+        else:
+            z = 0.5 * (zg + zl)
+        return z, zg, zl, moe_aux
 
 def make_model(pretrained):
     return Knee25DHybrid(CFG.BACKBONE, pretrained, len(CFG.PLANES), CFG.SLICES, CFG.D_MODEL,
                          head_type=CFG.HEAD_TYPE, recursions=CFG.MOR_RECURSIONS,
-                         n_experts=CFG.MOE_EXPERTS, top_k=CFG.MOE_TOPK)
+                         n_experts=CFG.MOE_EXPERTS, top_k=CFG.MOE_TOPK,
+                         pooling=CFG.POOLING, readout=CFG.READOUT, fusion=CFG.FUSION)
 
-_m = make_model(False); print(f"params: {sum(p.numel() for p in _m.parameters()) / 1e6:.2f} M | head_type: {CFG.HEAD_TYPE}"); del _m"""))
+_m = make_model(False)
+print(f"params: {sum(p.numel() for p in _m.parameters()) / 1e6:.2f} M | HEAD_TYPE={CFG.HEAD_TYPE} "
+     f"POOLING={CFG.POOLING} READOUT={CFG.READOUT} FUSION={CFG.FUSION}"); del _m"""))
 
 C.append(md("## 5. 5-fold training (expert-labelled studies held out)"))
-C.append(code(r"""def run_epoch(model, loader, opt=None, sched=None, scaler=None):
+C.append(code(r"""POS_WEIGHT = None   # set below, after Yp is known (class-balanced BCE; None = unweighted)
+
+def bce(logits, y, weight=None):
+    return F.binary_cross_entropy_with_logits(logits.float(), y, pos_weight=weight)
+
+def run_epoch(model, loader, opt=None, sched=None, scaler=None):
     train = opt is not None
-    model.train(train); preds, tot, n = [], 0.0, 0
+    model.train(train); preds = []
+    tot = dict(total=0.0, bce=0.0, aux=0.0, moe=0.0); n = 0
     for b in loader:
         x = b["x"].to(DEVICE, non_blocking=True).float().div_(255); m = b["m"].to(DEVICE)
         if train: x = gpu_augment(x)
@@ -510,30 +604,73 @@ C.append(code(r"""def run_epoch(model, loader, opt=None, sched=None, scaler=None
                 z, zg, zl, moe_aux = model(x, m)
         if train:
             y = b["y"].to(DEVICE)
-            loss = F.binary_cross_entropy_with_logits(z.float(), y) + CFG.AUX_W * (
-                F.binary_cross_entropy_with_logits(zg.float(), y) + F.binary_cross_entropy_with_logits(zl.float(), y)
-            ) + moe_aux.float().mean()          # MoE load-balance + router z-loss (no-op, 0, for HEAD_TYPE="transformer")
+            pw = POS_WEIGHT.to(DEVICE) if (CFG.LOSS_BALANCE and POS_WEIGHT is not None) else None
+            l_bce = bce(z, y, pw)
+            l_aux = CFG.AUX_W * (bce(zg, y, pw) + bce(zl, y, pw))
+            l_moe = moe_aux.float().mean()      # MoE load-balance + router z-loss (0 for HEAD_TYPE="transformer")
+            loss = l_bce + l_aux + l_moe
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward(); scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
             scaler.step(opt); scaler.update(); sched.step()
-            tot += loss.item() * len(y); n += len(y)
+            bs = len(y)
+            tot["total"] += loss.item() * bs; tot["bce"] += l_bce.item() * bs
+            tot["aux"] += l_aux.item() * bs; tot["moe"] += l_moe.item() * bs; n += bs
         else:
             preds.append(torch.sigmoid(z.float()).cpu().numpy())
-    return tot / max(n, 1) if train else np.concatenate(preds)
+    return {k: v / max(n, 1) for k, v in tot.items()} if train else np.concatenate(preds)
 
 def loader(idx, y=None, train=False):
     ds = KneeDS(VOL, MASK, idx, y, train)
     return torch.utils.data.DataLoader(ds, batch_size=CFG.BATCH if train else CFG.BATCH * 2, shuffle=train,
                                        num_workers=CFG.NUM_WORKERS, pin_memory=True, drop_last=train)
 
+def iterative_stratify(Y, k, seed=42):
+    '''Iterative multilabel stratification (Sechidis, Tsoumakas & Vlahavas, ECML PKDD 2011),
+    standalone-tested against a synthetic 4,349-row / 12-label imbalanced set before use (relative
+    per-label fold-count spread ~3%). Y: [N, L] soft labels in {0, 0.5, 1}; 0.5 (uncertain) counts
+    toward neither balancing target. Replaces the previous heuristic
+    (`np.clip((Yp>=0.5).sum(1),0,5)*2 + ACL`), which only looked at the *count* of positive labels
+    plus ACL specifically and ignored the other 11 labels' individual distributions -- rare labels
+    (e.g. MCL, French reports) could land almost entirely in one or two folds by chance.'''
+    rng = np.random.default_rng(seed)
+    N, L = Y.shape
+    pos, valid = (Y >= 1), (Y != 0.5)
+    remaining = np.ones(N, dtype=bool)
+    fold_of = np.full(N, -1, dtype=int)
+    desired_per_label = np.array([[pos[:, l].sum() / k] * k for l in range(L)])
+    desired_size = np.full(k, N / k)
+    fold_pos_count = np.zeros((L, k)); fold_size = np.zeros(k)
+    order = np.arange(N)
+    while remaining.any():
+        counts = np.array([(pos[:, l] & valid[:, l] & remaining).sum() for l in range(L)])
+        if counts.max() > 0:
+            candidates = np.where(counts == counts[counts > 0].min())[0]
+            l = rng.choice(candidates)
+            idxs = order[remaining & pos[:, l] & valid[:, l]]
+        else:
+            idxs = order[remaining]     # no labelled positives left: balance remaining by size only
+        rng.shuffle(idxs)
+        for i in idxs:
+            deficit = (desired_per_label[l] - fold_pos_count[l]) if counts.max() > 0 else (desired_size - fold_size)
+            best = np.flatnonzero(deficit == deficit.max())
+            f = rng.choice(best) if len(best) > 1 else best[0]
+            fold_of[i] = f; fold_size[f] += 1
+            fold_pos_count[:, f] += pos[i] & valid[i]
+            remaining[i] = False
+    return fold_of
+
 if CFG.MODE == "train":
     pool = np.where(~gold_mask)[0]; gold = np.where(gold_mask)[0]
     Yp = SOFT[pool]; Yg = train.loc[gold_mask, LABELS].values.astype(int)
-    strat = np.clip((Yp >= 0.5).sum(1), 0, 5) * 2 + (Yp[:, 0] >= 0.5)
-    folds = np.zeros(len(pool), int)
-    for f, (_, te) in enumerate(StratifiedKFold(CFG.FOLDS, shuffle=True, random_state=CFG.SEED).split(pool, strat)):
-        folds[te] = f
+    folds = iterative_stratify(Yp, CFG.FOLDS, seed=CFG.SEED)
+    if CFG.LOSS_BALANCE:
+        valid = Yp != 0.5
+        pos_n = ((Yp >= 1) & valid).sum(0).astype(np.float64)
+        neg_n = ((Yp < 1) & valid).sum(0).astype(np.float64)
+        pw = np.clip(neg_n / np.clip(pos_n, 1, None), 1.0, 20.0)   # capped: avoids unstable gradients on rare labels
+        POS_WEIGHT = torch.tensor(pw, dtype=torch.float32)
+        print("pos_weight per label:", dict(zip(LABELS, pw.round(2).tolist())))
     oof = np.full(Yp.shape, np.nan, np.float32); gold_preds = []; fold_times = []
     for f in CFG.TRAIN_FOLDS:
         t = time.time(); seed_all(CFG.SEED + f)
@@ -550,8 +687,8 @@ if CFG.MODE == "train":
                                                     total_steps=CFG.EPOCHS * len(dl), pct_start=0.1)
         scaler = torch.amp.GradScaler(enabled=CFG.AMP and DEVICE.type == "cuda")
         for ep in range(CFG.EPOCHS):
-            loss = run_epoch(model, dl, opt, sched, scaler)
-            msg = f"fold {f} ep {ep + 1}/{CFG.EPOCHS} loss {loss:.4f}"
+            L = run_epoch(model, dl, opt, sched, scaler)
+            msg = f"fold {f} ep {ep + 1}/{CFG.EPOCHS} loss {L['total']:.4f} (bce {L['bce']:.4f} aux {L['aux']:.4f} moe {L['moe']:.5f})"
             if ep == CFG.EPOCHS - 1 or (ep + 1) % 4 == 0:
                 pv = run_epoch(model, loader(va))
                 yv = Yp[folds == f]; msg += f" | val macroAUC(report labels) {macro_auc((yv >= 1).astype(int), pv, yv != 0.5):.4f}"

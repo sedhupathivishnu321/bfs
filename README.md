@@ -235,6 +235,58 @@ single file with no repo dependency at run time); its router/aux-loss formulatio
 load-balancing loss above, and `docs/literature_review.md` §5 credits the underlying papers (Shazeer 2017,
 Fedus 2022, Zoph 2022, Jiang 2024) it in turn draws on.
 
+### 3.2 Notebook pipeline fixes prompted by an external review (this update)
+
+A review of the Kaggle notebook (before §3.1's MV-MoRE addition) correctly pointed out that MV-MoRE only
+replaces the local mixer, while several other components identified as weaknesses in this repo's own earlier
+analysis were untouched, and that the CNN backbone — 99.9% of compute — was still the wrong place to look for
+"MoE efficiency" claims to matter. Four of those points were concrete, low-risk fixes rather than open
+research questions, so they are implemented now, each behind its own CFG toggle (default = the fix; the
+original behaviour is kept as the alternative, so the previously-measured 0.769 gold AUC run stays exactly
+reproducible — see `CFG`'s E0–E5 comment table in the notebook):
+
+* **CNN compute on missing planes (real bug, not just style).** `Knee25DHybrid` fed the CNN an all-zero image
+  for every masked-out plane and only zeroed the *result* afterwards. `encode_planes` now gathers out the
+  `(study, plane)` rows where the mask is `False` *before* the CNN call and leaves their features at exact
+  zero, so plane dropout (15% of training batches) and any naturally missing plane now skip real backbone
+  compute instead of wasting it — the single largest efficiency lever available, since the backbone is
+  three to four orders of magnitude more expensive than the head (§3.1).
+* **Global-branch pooling** (`CFG.POOLING="attention"`, default): mean-pooling over `SLICES` slices divides a
+  finding's signal by `SLICES` even when it is visible on only 1–2 of them; a learned per-slice attention
+  score (`AttnPool`) lets the branch weight the slices that actually show it. Falls back exactly to a
+  weighted sum of zeros for a masked plane, so the missing-plane convention is unchanged.
+* **Label readout** (`CFG.READOUT="shared_mlp"`, default): the original per-label logit was a bilinear
+  $(q_k+a_k)^\top w_k+b_k$ with no parameter sharing across labels; `SharedMLPReadout` applies one small
+  MLP (`LayerNorm→Linear→GELU→Linear`) identically to all 12 label-query outputs.
+* **Fusion** (`CFG.FUSION="learned"`, default): the original head always used $z=0.5z_g+0.5z_l$ for every
+  label. A learned per-label sigmoid gate (`self.fuse_gate`, initialised to 0.5 so training starts identical
+  to the original) is exactly the gate already measured to help on the CPU study's `HybridMVMoR` (§5.7:
+  +0.025 gold AUC over the ungated local branch) — porting a result that already worked once, not a new
+  untested idea.
+
+Two further points from the same review were addressed at the training-loop level:
+
+* **Class-balanced loss** (`CFG.LOSS_BALANCE=True`, default): per-label `pos_weight` computed from the
+  training pool's own prevalence (`neg/pos`, clipped to [1, 20] to avoid destabilising gradients on the
+  rarest labels), so common and rare findings no longer contribute equally to the loss regardless of
+  prevalence.
+* **Fold assignment.** The original heuristic (`clip(#positive labels, 0, 5)*2 + ACL`) stratified on a
+  collapsed summary, not the 12 labels individually — a label like MCL could land unevenly across folds by
+  chance. It is replaced by **iterative multilabel stratification** (Sechidis, Tsoumakas & Vlahavas, ECML
+  PKDD 2011), implemented and **unit-tested standalone before being inlined** (`iterative_stratify` in the
+  notebook; standalone test: [`scripts/test_iterative_stratify.py`](scripts/test_iterative_stratify.py)): on
+  a synthetic 4,349-row, 12-label set at realistic,
+  imbalanced prevalence it holds fold sizes within 1 study of equal and the worst per-label fold-count
+  spread to about 3%, against the ad hoc heuristic's untested and likely worse balance on rare labels.
+
+**What this does not do.** It does not touch the CPU study's `src/kneemor/models.py` defaults (that code's
+already-measured 345,743-parameter, 0.784-OOF-AUC numbers must stay exactly reproducible); `HybridMVMoR`
+there already has a learned gate, and `MeanPoolMLP` is deliberately a mean-pooling baseline, so neither
+needed the notebook's fix. It also does not address the review's larger, genuinely open research points —
+whether MV-MoRE's extra capacity earns its parameter cost, whether the capacity schedule `(1, 0.5, 0.25)`
+loses information an important slice needed, or the controlled E0–E5 comparison itself — those still require
+running the notebook, which this session cannot do (§3.1, §7).
+
 ## 4. Experimental protocol (identical for every model)
 
 * **Gold test set.** The 58 expert-labelled studies. They are never used for training, early stopping, model
@@ -623,6 +675,12 @@ in place** — and to report whatever that measurement turns out to be, includin
   writing new dispatch logic. None of that substitutes for actually running it; do that first, via
   `bash scripts/run_experiments.sh` and/or the Kaggle notebook with `HEAD_TYPE="more"`, before trusting any
   AUC, FLOPs or latency number for `mvmore` / `hybrid_more`.
+* **§3.2's four pipeline fixes (attention pooling, shared-MLP readout, learned fusion, class-balanced loss)
+  are likewise unexecuted** — same constraint, same recommendation. The one piece with real bug risk if
+  transcribed wrong, `iterative_stratify`, was the one piece unit-tested standalone (outside the notebook,
+  with plain numpy) before being inlined; the model-side changes (`AttnPool`, `SharedMLPReadout`, the
+  missing-plane gather in `encode_planes`) were checked only by code review against already-measured
+  patterns elsewhere in this repo, not by execution.
 
 ## 8. Reproduce
 
