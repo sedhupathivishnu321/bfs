@@ -1,5 +1,15 @@
 # MV-MoR: a multi-view Mixture-of-Recursions framework for RSNA Knee Abnormality Detection
 
+> **Kaggle GPU notebook:** [`notebooks/rsna_knee_kaggle.ipynb`](notebooks/rsna_knee_kaggle.ipynb) is a
+> self-contained train, evaluate and submit pipeline:
+> * 2.5-D fine-tuned CNN with a hybrid global/label-query head;
+> * rule labeler plus an optional LLM labeler, selected on the 58 expert studies;
+> * 5-fold CV, with expert-set AUC and accuracy measured;
+> * `submission.csv`.
+>
+> Rebuild it with `python notebooks/build_kaggle_notebook.py`. It was smoke-tested end-to-end on CPU in
+> both train and infer modes; no GPU scores have been measured yet.
+
 This is a reproducible, leakage-safe pipeline for the Kaggle competition
 [RSNA Knee Abnormality Detection](https://www.kaggle.com/competitions/rsna-knee-abnormality-detection).
 The competition asks for 12 study-level findings from multi-sequence knee MRI, scored by macro AUC-ROC.
