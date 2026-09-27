@@ -304,6 +304,64 @@ Toshiba is a possible domain-shift failure mode.
 Synovitis and effusion are exactly where the labeler disagrees most with gold. Meniscal tears are small
 structures that 2×2-pooled frozen ImageNet features probably cannot resolve.
 
+### 5.7 Hybrid global-local head (MV-MoR-H), added after the main study
+
+**Design** (`HybridMVMoR` in [`src/kneemor/models.py`](src/kneemor/models.py)). The main study showed that
+the per-plane mean-pool MLP is the strongest head on OOF, while MV-MoR is competitive on gold. The hybrid
+therefore trains both as one network over the same tokens:
+
+* **Global branch** $z_g$: an MLP over per-plane mean-pooled tokens, aimed at diffuse findings such as
+  effusion and OA.
+* **Local branch** $z_l$: MV-MoR (recursive routed tokens with label queries), aimed at focal findings such
+  as tears and cysts.
+* **Fusion:** a per-label convex gate, $z=a\,z_g+(1-a)\,z_l$ with $a=\sigma(g_\ell)$.
+* **Deep supervision:** the loss is $\mathcal L=\mathrm{BCE}(z)+0.5\,[\mathrm{BCE}(z_g)+\mathrm{BCE}(z_l)]$.
+* **Size:** 745k parameters and 0.128 GFLOPs per study (measured). The routed branch accounts for almost all
+  of the FLOPs.
+* **Protocol:** identical to the main study (10 epochs, lr 5e-4, same folds, 3 seeds). Two ablations use seed
+  0. The comparison also includes a **post-hoc average** of the separately trained MLP and MV-MoR
+  (`avg_mlp_mvmor`, with the seeds paired).
+
+**Results, averaged over 3 seeds** ([`results/summary.csv`](results/summary.csv)):
+
+| Model | Params | OOF AUC | Gold AUC | Gold AUC, 3-seed ensemble [95% CI] |
+|---|---|---|---|---|
+| Mean-pool MLP | 400k | 0.792 ± 0.001 | 0.699 ± 0.002 | 0.699 [0.641, 0.753] |
+| MV-MoR | 346k | 0.784 ± 0.001 | 0.700 ± 0.006 | 0.705 [0.641, 0.762] |
+| Post-hoc average MLP + MV-MoR | 745k | **0.797 ± 0.001** | 0.706 ± 0.003 | 0.705 [0.643, 0.762] |
+| **Hybrid MV-MoR-H** | 745k | 0.792 ± 0.002 | **0.711 ± 0.007** | **0.713** [0.651, 0.769] |
+
+**Paired tests, seed 0 vs seed 0** ([`results/paired_seed0_vs_hybrid.csv`](results/paired_seed0_vs_hybrid.csv)).
+Hybrid seed 0 scores OOF 0.794 and gold 0.720. Each Δ is the hybrid's AUC minus the other model's.
+
+| Other model | ΔAUC OOF, p | ΔAUC gold [95% CI], p |
+|---|---|---|
+| MV-MoR | +0.011, p < 0.005 | **+0.025** [0.010, 0.040], p < 0.005 |
+| Mean-pool MLP | +0.001, p = 0.33 | +0.022 [0.003, 0.040], p = 0.024 |
+| Post-hoc average MLP + MV-MoR | −0.003, p = 0.03 | +0.019 [0.008, 0.029], p < 0.005 |
+| Hybrid without deep supervision | +0.005, p < 0.005 | +0.006, p = 0.23 |
+| Hybrid with fixed 0.5 gate | +0.000, p = 0.21 | +0.001, p = 0.45 |
+
+**Interpretation:**
+
+* **The hybrid gives the best gold AUC measured in this study.** Its 3-seed ensemble reaches 0.713, and its
+  seed-mean gold AUC is 0.711 against 0.700 for MV-MoR and 0.699 for the MLP.
+* **Seed 0 is its best seed.** Seed 0 reaches 0.720 on gold, while the seed means differ by only about 0.01.
+  About 15 paired tests were run, so the seed-0 p-values of about 0.02 should be read cautiously. The gold CI
+  still overlaps every other neural head.
+* **On OOF, the hybrid equals the MLP.** It is slightly *below* the post-hoc average there; on gold it is
+  above it.
+* **The learned gate did not learn.** Across all 15 fold models every $a_\ell$ stayed at 0.49–0.51
+  ([`results/hybrid_gates.npy`](results/hybrid_gates.npy)), and the fixed-gate ablation is identical. A scalar
+  gate under weight decay 0.05 and lr 5e-4 barely moves in 10 epochs. The gains therefore come from **joint
+  training with deep supervision** (the no-aux ablation is significantly worse on OOF), not from per-label
+  routing between branches.
+* **Accuracy did not rise.** Gold accuracy at OOF-fitted thresholds is about 0.60, versus 0.655 for always
+  predicting "negative", because silver-fitted thresholds transfer poorly to the enriched gold set. AUC is
+  the competition metric, and it is the metric that improved.
+* **Inference:** `python src/kneemor/infer.py --key hybrid_s0 ...`; the checkpoints are in
+  `results/models/hybrid_s0_f*.pt`.
+
 ## 6. Conclusions (evidence-based)
 
 * **H1 (joint multi-view attention beats pooling): partly supported.**
@@ -324,6 +382,9 @@ structures that 2×2-pooled frozen ImageNet features probably cannot resolve.
 * **H4 (multi-view): supported.** Sagittal-only input is significantly worse on OOF (−0.016).
 * **The dominant bottleneck is label quality, not the head architecture.** Every head lands at 0.69–0.71
   gold macro AUC, below the 0.735 that the silver labeler itself reaches against gold.
+* **Hybrid (§5.7).** The jointly trained global-local hybrid with deep supervision gives the best measured
+  gold AUC: 0.713 for the ensemble, 0.711 ± 0.007 over seeds. This is a small gain whose CIs overlap the
+  other heads. It is the recommended submission head, with a mean-pool MLP as the cheap fallback.
 * **Practical recommendation for the competition.** The mean-pool MLP is as good as MV-MoR on gold and
   costs about 0.001 GFLOPs. MV-MoR is the better choice only among attention heads. The large expected gains
   lie elsewhere:
