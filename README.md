@@ -99,7 +99,12 @@ tokens ──► head (MV-MoR or baseline) ──► 12 logits                  
   cover all 4,407. Scanners: Siemens, GE, Philips and Toshiba at 1.0–3.0 T (6,051 series at 1.5 T, 3,819 at
   3 T). The median series has 30 slices (range 12–320).
 * **Series choice uses DICOM-derived metadata only** (plane, fluid-sensitive, fat-suppressed), which is also
-  available at test time.
+  available at test time. A follow-up audit ([`docs/data_audit.md`](docs/data_audit.md)) found the
+  fluid-sensitive and fat-suppressed flags are 100% correlated in this cohort (so the weighted score is
+  effectively one signal, not two) and that most study-plane pairs have more than one candidate series, so
+  this tie-break is doing real work, not occasionally resolving rare ties; it also found no leakage or
+  corruption, but a cluster of 177 studies whose reports are verbatim template text, reducing the silver
+  pool's effective diversity below its raw count.
 * **Inference parity.** [`src/kneemor/infer.py`](src/kneemor/infer.py) reads raw local DICOM folders, as on
   Kaggle. On the 3 demo test studies its predictions match the streamed training-time path to within
   3×10⁻⁸ ([`results/submission_demo.csv`](results/submission_demo.csv)).
@@ -240,6 +245,43 @@ Medial OA −0.017. In E5, Synovitis falls further, to 0.583 (−0.062 vs. E0).
   are wrong individually — each was motivated by a real, separate weakness — only that this specific
   combination, trained together with no per-component ablation yet, is not an improvement over MV-MoRE alone
   on this evidence.
+
+**Isolating the E1→E5 regression: MoR/MoE is not the candidate, by construction.** `HEAD_TYPE="more"` — the
+`MoEFFN` + `MoRELocal`/`MoREBlock` stack — is byte-for-byte identical between E1 and E5; it is what E0→E1
+already measured as a net positive (above), and holding it constant across E1→E5 means it cannot be the
+cause of that regression. The four candidates are `POOLING`, `READOUT`, `FUSION` and `LOSS_BALANCE`. A
+follow-up analysis of these same two runs (correlating per-label deltas against mechanistic predictors, and
+comparing the two full training-loss curves) narrows this further:
+
+| Hypothesis | Test | Pearson *r* | Verdict |
+|---|---|---|---|
+| `LOSS_BALANCE` systematically hurts high-`pos_weight` labels | per-label `pos_weight` vs. Δgold-AUC | −0.046 | No relationship |
+| Regression tracks label-source (rule-labeler) noise | per-label labeler AUC vs. Δgold-AUC | 0.017 | No relationship |
+| Regression tracks gold-set label rarity | per-label gold positive count vs. Δgold-AUC | 0.27 | Weak at best |
+
+None of the three is a clean systematic driver — the per-label reshuffling between E1 and E5 does not look
+like a targeted failure mode of any single tested mechanism. Comparing the two full loss curves (all 5 folds,
+epoch 1 → epoch 2, from the committed executed notebooks) shows a real difference of **degree**, not the
+clean presence/absence an earlier pass at this analysis claimed: E1's unweighted BCE has a small epoch-1→2
+uptick in 4 of 5 folds (+0.0004 to +0.0070, e.g. fold 0: 0.8603→0.8671) and one fold where it already
+decreases (fold 3: 0.8589→0.8417), before decreasing smoothly everywhere from epoch 3 on. E5's
+`LOSS_BALANCE`-weighted loss has the same uptick in **all 5 of 5 folds, 15–30× larger** (+0.105 to +0.128,
+e.g. fold 0: 2.5115→2.6330) before likewise decreasing smoothly from epoch 3 on. So the honest claim is "far
+more pronounced and universal in E5," not "only appears in E5" — but that distinction of degree is still
+real and still consistent with `pos_weight` values up to 18.15 (Fracture) sharpening the loss landscape
+before OneCycleLR's warm-up has ramped the learning rate up enough to absorb it smoothly. That makes
+**`LOSS_BALANCE` the most mechanistically plausible single contributor**: it is the only one of the four
+changes that touches the optimisation
+objective rather than only adding architecture, and it has a directly observed effect on the loss curve. The
+three architecture additions (`AttnPool`, `SharedMLPReadout`, the fusion gate) are all freshly-initialised
+parameters with near-zero correlation to the per-label outcome, more consistent with added
+initialisation variance than a systematic harm. **This is not yet a proven causal claim** — the decisive
+experiment is the E1→E4 sweep (toggle exactly one of the four flags at a time on top of MV-MoRE, holding the
+other three at E1's settings) that this repository has not run. If you run it, prioritise
+`LOSS_BALANCE` alone first (`HEAD_TYPE="more"`, `POOLING="mean"`, `READOUT="linear"`, `FUSION="fixed"`,
+`LOSS_BALANCE=True`) given the loss-curve lead above; `POOLING`, `READOUT` and `FUSION` alone are the natural
+follow-ups regardless of that result, since the correlation test cannot rule out a smaller or non-additive
+effect from any one of them.
 * **The "near-zero extra FLOPs" claim below undersold the real cost.** MV-MoRE measurably added 32–42%
   wall-clock training time, not the negligible amount a pure FLOPs-share argument (backbone ≈99.9% of FLOPs)
   implied. FLOPs and wall-clock are not the same thing: `MoEFFN`'s sparse dispatch (§ Design, point 2) is
@@ -717,6 +759,16 @@ in place** — and to report whatever that measurement turns out to be, includin
 
 ## 7. Limitations
 
+* **The silver pool's effective diversity is below its raw 4,349-study count** ([`docs/data_audit.md`](docs/data_audit.md)):
+  46 distinct report texts repeat verbatim across 177 studies (worst case: one Turkish template in 37
+  studies), so those studies contribute fewer independent label signals than their count suggests.
+* **Series selection relies on what is effectively one signal, not two.** `Fluid_Sensitive` and
+  `Fat_Suppression` are 100% correlated in this cohort, so `select_series()`'s weighted score is closer to
+  weighting one flag 3x than combining independent evidence — and it is consequential, not a rare tie-break,
+  since most study-plane pairs have more than one candidate series ([`docs/data_audit.md`](docs/data_audit.md)).
+* **Native image resolution varies widely (256×256 to 1024×1024) and is ignored by both pipelines**, which
+  resize everything to a fixed 224×224 (Kaggle) or 160×160 (CPU study); a 1024×1024 series loses more
+  relative detail at that target size than a 320×320 one, and this is not currently corrected for.
 * The gold set is tiny (58 studies), so gold CIs span about 0.12. None of the architectural differences on
   gold are statistically significant.
 * The silver labels are noisy and rule-based. Using the gold set to tune the labeler would bias the

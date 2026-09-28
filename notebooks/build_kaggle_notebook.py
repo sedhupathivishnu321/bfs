@@ -282,6 +282,10 @@ if CFG.MODE == "train":
 
 C.append(md("## 3. DICOM → cached volumes"))
 C.append(code(r"""def select_series(sdf):
+    # Data audit note (docs/data_audit.md): Fluid_Sensitive == Fat_Suppression with zero exceptions
+    # across all 24,371 series in this cohort, so this is effectively a single signal weighted 3x,
+    # not two independent flags -- and it does real work: series-per-plane duplication is common
+    # (roughly a third of study-plane pairs have more than one candidate series).
     df = sdf.copy()
     df["_r"] = -df.Fluid_Sensitive * 2 - df.Fat_Suppression
     df = df.sort_values(["StudyInstanceUID", "Anatomical_Plane", "_r", "SeriesInstanceUID"])

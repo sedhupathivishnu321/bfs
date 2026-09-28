@@ -43,6 +43,13 @@ def select_series(series_df: pd.DataFrame, per_plane: int = 1) -> pd.DataFrame:
     targets (tears, effusion, contusion, synovitis, cysts) are conspicuous on
     them. Ties are broken deterministically by SeriesInstanceUID. This choice
     depends only on DICOM-derived metadata available at test time (no labels).
+
+    Data audit note (docs/data_audit.md): across all 24,371 series, Fluid_Sensitive
+    == Fat_Suppression with zero exceptions in this cohort, so the two terms below
+    are not independent evidence -- this is closer to weighting one signal 3x than
+    combining two. Series-per-plane duplication is also common (roughly a third of
+    study-plane pairs have >1 candidate series), so this tie-break does real work;
+    it has not been shown to be the best available criterion, only a leakage-safe one.
     """
     df = series_df.copy()
     df["_rank"] = -df["Fluid_Sensitive"] * 2 - df["Fat_Suppression"]
