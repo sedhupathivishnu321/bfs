@@ -105,6 +105,18 @@ unaffected and numerically identical to the GPU notebook:
 * **Paths fixed for Kaggle.** `DATA_DIR` / `CACHE_DIR` / `OUT_DIR` point at `/kaggle/input` (auto-detected)
   and `/kaggle/working`, matching how this notebook actually runs on Kaggle.
 
+## More robust Kaggle input-path detection
+
+`find_data_dir()` now checks **both** mount conventions Kaggle uses for attached data -- the classic
+`/kaggle/input/<name>` and, for a dataset attached via the newer picker with an owner-qualified handle,
+`/kaggle/input/datasets/<owner>/<name>` -- via a bounded-depth walk that steps around the huge per-study
+DICOM trees (`train_series`/`test_series`) instead of descending into them. The same helper
+(`find_kaggle_path`) is used as a fallback for `WEIGHTS_DIR` in `MODE="infer"`, so a weights dataset
+attached under either convention is still found instead of requiring an exact path match. This generalises
+the same idea used for asset discovery in other Kaggle inference notebooks; only the general technique
+(check both mount shapes, walk with bounded depth, skip the big series folders) is reused here, not any
+specific paths, checkpoints, or code from elsewhere.
+
 **Targets vs. guarantees.** As before: nothing here *guarantees* a particular macro AUC or accuracy; the
 notebook **measures and prints** what it achieves. The default MV-MoRE head's TPU numbers are **not yet
 measured** by this notebook -- only the GPU run with `HEAD_TYPE="transformer"` has a reported gold result.
@@ -227,12 +239,47 @@ if CFG.USE_LLM_LABELS and DEVICE.type == "xla":
           "disabling for this run and using the rule labeler.")
     CFG.USE_LLM_LABELS = False
 
+def _kaggle_roots():
+    # Kaggle mounts attached data at either "/kaggle/input/<name>" (classic) or, for a dataset attached
+    # via the newer picker with an owner-qualified handle, "/kaggle/input/datasets/<owner>/<name>".
+    # Checking both conventions -- rather than assuming one -- means the notebook isn't only working
+    # because of how a particular dataset happened to get attached last time.
+    return sorted(glob.glob("/kaggle/input/*")) + sorted(glob.glob("/kaggle/input/datasets/*/*"))
+
+def _kaggle_walk(root, max_depth=4, skip=("train_series", "test_series", "train_images", "test_images")):
+    # Bounded-depth walk that steps around the huge per-study DICOM trees: irrelevant when looking for a
+    # handful of top-level marker/weight files, and walking them in full would be slow.
+    level = [root]
+    for _ in range(max_depth):
+        nxt = []
+        for d in level:
+            try:
+                entries = sorted(os.scandir(d), key=lambda e: e.name)
+            except OSError:
+                continue
+            yield d, [e.name for e in entries if e.is_file()]
+            nxt += [e.path for e in entries if e.is_dir() and e.name not in skip]
+        level = nxt
+
 def find_data_dir():
     if CFG.DATA_DIR: return CFG.DATA_DIR
-    for p in sorted(glob.glob("/kaggle/input/*")) + sorted(glob.glob("/kaggle/input/*/*")):
-        if os.path.exists(os.path.join(p, "test_series.csv")): return p
-    raise FileNotFoundError("competition data not found under /kaggle/input")
+    for root in _kaggle_roots():
+        for d, files in _kaggle_walk(root):
+            if "test_series.csv" in files: return d
+    raise FileNotFoundError("competition data (test_series.csv) not found under /kaggle/input")
 DATA = find_data_dir(); print("data:", DATA)
+
+def find_kaggle_path(*name_globs):
+    # Search both Kaggle mount conventions (see _kaggle_roots) for a file or directory matching any of
+    # name_globs. Used as a fallback when a configured path (WEIGHTS_DIR, LLM_PATH) doesn't exist exactly
+    # as given -- e.g. because a dataset got attached under the owner-qualified path this run.
+    import fnmatch
+    for root in _kaggle_roots():
+        for d, files in _kaggle_walk(root):
+            if any(fnmatch.fnmatch(os.path.basename(d), pat) for pat in name_globs): return d
+            if any(fnmatch.fnmatch(f, pat) for f in files for pat in name_globs): return d
+    return None
+
 LABELS = ["ACL", "MCL", "Medial Meniscus", "Lateral Meniscus", "Medial OA", "Lateral OA",
           "PF OA", "Effusion", "Synovitis", "Baker's", "Contusion", "Fracture"]
 T0 = time.time()
@@ -735,6 +782,9 @@ C.append(md("## 7. Test inference -> `submission.csv`"))
 C.append(code(r"""t_inf = time.time()
 test = pd.read_csv(f"{DATA}/test.csv")
 wdir = CFG.OUT_DIR if CFG.MODE == "train" else CFG.WEIGHTS_DIR
+if CFG.MODE == "infer" and not os.path.exists(f"{wdir}/config.json"):
+    found = find_kaggle_path(os.path.basename(wdir.rstrip("/")), "fold*.pt")   # WEIGHTS_DIR didn't exist as configured
+    if found: wdir = found; print("WEIGHTS_DIR not found as configured; auto-detected:", wdir)
 if CFG.MODE == "infer" and os.path.exists(f"{wdir}/config.json"):
     for k, v in json.load(open(f"{wdir}/config.json")).items():
         if k in ("BACKBONE", "SLICES", "IMG", "D_MODEL", "PLANES"): setattr(CFG, k, v)
