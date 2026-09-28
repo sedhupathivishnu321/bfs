@@ -173,6 +173,91 @@ if os.environ.get("KNEE_SMOKE") == "1":   # used only by the author's CPU smoke 
 os.makedirs(CFG.CACHE_DIR, exist_ok=True); os.makedirs(CFG.OUT_DIR, exist_ok=True)
 print({k: v for k, v in vars(CFG).items() if not k.startswith("_")})"""))
 
+C.append(code(r"""import numpy as np, pandas as pd, torch, torch.nn as nn, torch.nn.functional as F
+import cv2, pydicom, timm, socket
+from concurrent.futures import ProcessPoolExecutor
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import StratifiedKFold
+
+def seed_all(s):
+    random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
+seed_all(CFG.SEED)
+
+# ------------------------- accelerator: TPU (XLA) > GPU (CUDA) > CPU -------------------------
+# Falls back gracefully if "TPU VM v3-8" wasn't selected in Settings (or torch_xla can't reach a
+# TPU), so the same notebook still runs -- just not on TPU.
+xm = None
+def setup_device():
+    global xm
+    try:
+        import torch_xla.core.xla_model as _xm
+    except ImportError:
+        try:
+            import subprocess, sys
+            ver = torch.__version__.split("+")[0]
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", f"torch_xla[tpu]=={ver}",
+                            "-f", "https://storage.googleapis.com/libtpu-releases/index.html"],
+                           check=True, timeout=600)
+            import torch_xla.core.xla_model as _xm
+        except Exception as e:
+            print(f"torch_xla not available ({e!r}); using GPU/CPU instead.")
+            return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    try:
+        dev = _xm.xla_device()
+        _ = (torch.ones(1, device=dev) + 1).cpu()   # make sure the TPU actually answers
+        xm = _xm
+        return dev
+    except Exception as e:
+        print(f"TPU hardware not reachable ({e!r}); falling back to GPU/CPU. "
+              f"Select Settings -> Accelerator -> TPU VM v3-8 to use a TPU.")
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = setup_device()
+N_GPU = torch.cuda.device_count()
+print("device:", DEVICE, "| GPUs:", N_GPU, "| torch", torch.__version__, "| timm", timm.__version__)
+
+if DEVICE.type == "xla" and CFG.NUM_WORKERS != 0:
+    print("NUM_WORKERS -> 0 on TPU/XLA: each __getitem__ is a cheap memmap read (DICOM decoding already "
+          "happened in build_cache), and forking DataLoader workers after the XLA runtime is initialized "
+          "in this process is a known source of hangs.")
+    CFG.NUM_WORKERS = 0
+if CFG.USE_LLM_LABELS and DEVICE.type == "xla":
+    print("USE_LLM_LABELS=True is not supported on TPU (transformers device_map='auto' targets CUDA/CPU); "
+          "disabling for this run and using the rule labeler.")
+    CFG.USE_LLM_LABELS = False
+
+# ------------------------- pretrained-weight download: check once, degrade gracefully -------------------------
+# timm.create_model(..., pretrained=True) fetches weights from huggingface.co. Kaggle TPU VM sessions have
+# a separate worker VM whose outbound path to arbitrary hosts is less reliable than on GPU/CPU, even with
+# Settings -> Internet -> On, and can fail with a DNS error ("Temporary failure in name resolution"); a
+# retry bug in some huggingface_hub versions then turns that into a confusing "client has been closed"
+# RuntimeError instead of a clean failure. Checked once, up front, instead of inside the 5-fold loop in
+# cell 13, so a bad connection degrades to a random-init backbone (still trains and finishes) rather than
+# crashing the run -- and rather than paying the connect timeout on every fold.
+def hf_reachable(host="huggingface.co", timeout=5):
+    try:
+        socket.create_connection((host, 443), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+if CFG.PRETRAINED and not hf_reachable():
+    print("huggingface.co unreachable from this session (DNS/network) -- Kaggle TPU sessions often can't "
+          "reach arbitrary hosts even with Internet ON. Falling back to CFG.PRETRAINED = False (random-init "
+          "backbone) so the run finishes; gold/OOF AUC from this run will reflect a random-init backbone, "
+          "not the pretrained one. For real pretrained-weight numbers on TPU, cache the timm checkpoint "
+          "into a Kaggle Dataset and point HF_HOME at it instead of relying on a live download.")
+    CFG.PRETRAINED = False
+
+def find_data_dir():
+    if CFG.DATA_DIR: return CFG.DATA_DIR
+    for p in sorted(glob.glob("/kaggle/input/*")) + sorted(glob.glob("/kaggle/input/*/*")):
+        if os.path.exists(os.path.join(p, "test_series.csv")): return p
+    raise FileNotFoundError("competition data not found under /kaggle/input")
+DATA = find_data_dir(); print("data:", DATA)
+LABELS = ["ACL", "MCL", "Medial Meniscus", "Lateral Meniscus", "Medial OA", "Lateral OA",
+          "PF OA", "Effusion", "Synovitis", "Baker's", "Contusion", "Fracture"]
+T0 = time.time()
+def elapsed(): return f"{(time.time() - T0) / 60:.1f} min" """))
+
 # ============================== remaining cells are added incrementally, cell by cell ==============================
 
 nb = nbf.v4.new_notebook(cells=C)
