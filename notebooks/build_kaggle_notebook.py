@@ -26,9 +26,14 @@ This is a self-contained Kaggle notebook: turn on a **GPU** (T4×2 or P100) and 
    * an *optional* local LLM labeler (attach a Qwen2.5-Instruct model).
 
    The notebook scores **both** on the 58 expert studies and trains on whichever agrees better.
+   `CFG.DEDUP_WEIGHT` (default on) down-weights studies whose report text is a verbatim duplicate of
+   others' (`docs/data_audit.md`: 177 studies share only 46 distinct templates), since those labels carry
+   less independent signal than their raw count implies, even though the underlying images still differ.
 2. **Preprocessing.** For each plane (sagittal, coronal, axial) it takes the best fluid-sensitive series,
-   sorts it along the slice normal, resamples it to `SLICES` slices at `IMG` px, and caches the volume as
-   uint8.
+   sorts it along the slice normal, and resamples it to `SLICES` slices at `IMG` px via
+   `pick_slice_indices()` (unique indices when the series has enough slices, explicit last-slice padding
+   when it doesn't, replacing a plain rounded `linspace` that could duplicate slices near the ends of a
+   short series), then caches the volume as uint8.
 3. **Model: 2.5-D hybrid.** Four independent CFG toggles turn this into a controlled ablation matrix
    rather than one fixed design (see the CFG cell for the E0..E5 mapping and each toggle's rationale);
    every default below is the proposed setting, and every alternative is the original pipeline that
@@ -107,6 +112,10 @@ class CFG:
     FUSION = "learned"             # "learned" (proposed: per-label sigmoid gate, mirrors kneemor's HybridMVMoR)
                                     # | "fixed" (original: always 0.5*global + 0.5*local for every label)
     LOSS_BALANCE = True            # per-label pos_weight from training-pool prevalence (helps rare labels)
+    DEDUP_WEIGHT = True            # down-weight studies whose report is a verbatim duplicate of others
+                                    # (docs/data_audit.md finding 5: 177 studies share only 46 distinct
+                                    # report texts). Independent of the HEAD_TYPE/POOLING/READOUT/FUSION
+                                    # E0-E5 matrix above -- a data-quality fix, not an architecture one.
     MOR_RECURSIONS = 3             # MoR: max weight-shared recursions per token (expert-choice depth routing)
     MOE_EXPERTS = 4                # MoE: experts in the shared block's FFN
     MOE_TOPK = 2                   # MoE: experts each token is dispatched to (sparse, no capacity dropping)
@@ -298,6 +307,20 @@ def _pos(ds):
     except Exception:
         return float(getattr(ds, "InstanceNumber", 0))
 
+def pick_slice_indices(n, S):
+    # Data audit note (docs/data_audit.md finding 3): series range 11-320 slices against a fixed
+    # S -- a plain np.linspace(...).round() can round two target positions to the same index near
+    # the ends of a short series. n>=S: evenly spaced and guaranteed unique (any rounding collision
+    # repaired by inserting the largest gap's midpoint). n<S: keep every slice, pad with the last one.
+    if n >= S:
+        idx = np.unique(np.round(np.linspace(0, n - 1, S)).astype(int))
+        while len(idx) < S:
+            gaps = np.diff(idx)
+            j = int(np.argmax(gaps))
+            idx = np.unique(np.insert(idx, j + 1, (idx[j] + idx[j + 1]) // 2))
+        return idx[:S]
+    return np.concatenate([np.arange(n), np.full(S - n, n - 1, dtype=int)])
+
 def series_volume(files, S, size):
     hdr = []
     for f in files:
@@ -309,7 +332,7 @@ def series_volume(files, S, size):
     if not hdr: return None
     shp = pd.Series([h[1] for h in hdr]).value_counts().index[0]
     hdr = sorted([h for h in hdr if h[1] == shp], key=lambda h: h[0])
-    idx = np.linspace(0, len(hdr) - 1, S).round().astype(int)
+    idx = pick_slice_indices(len(hdr), S)
     imgs = []
     for i in idx:
         try:
@@ -365,8 +388,8 @@ if CFG.MODE == "train":
 
 C.append(md("## 4. Dataset & 2.5-D hybrid model"))
 C.append(code(r"""class KneeDS(torch.utils.data.Dataset):
-    def __init__(self, vol, mask, idx, y=None, train=False):
-        self.vol, self.mask, self.idx, self.y, self.train = vol, mask, idx, y, train
+    def __init__(self, vol, mask, idx, y=None, train=False, w=None):
+        self.vol, self.mask, self.idx, self.y, self.train, self.w = vol, mask, idx, y, train, w
     def __len__(self): return len(self.idx)
     def __getitem__(self, i):
         j = self.idx[i]
@@ -377,6 +400,7 @@ C.append(code(r"""class KneeDS(torch.utils.data.Dataset):
                 k = random.choice(torch.where(m)[0].tolist()); m[k] = False; v[k] = 0
         out = {"x": v, "m": m}
         if self.y is not None: out["y"] = torch.from_numpy(self.y[i])
+        if self.w is not None: out["w"] = torch.tensor(self.w[i], dtype=torch.float32)
         return out
 
 
@@ -593,8 +617,12 @@ print(f"params: {sum(p.numel() for p in _m.parameters()) / 1e6:.2f} M | HEAD_TYP
 C.append(md("## 5. 5-fold training (expert-labelled studies held out)"))
 C.append(code(r"""POS_WEIGHT = None   # set below, after Yp is known (class-balanced BCE; None = unweighted)
 
-def bce(logits, y, weight=None):
-    return F.binary_cross_entropy_with_logits(logits.float(), y, pos_weight=weight)
+def bce(logits, y, pos_weight=None, sample_weight=None):
+    l = F.binary_cross_entropy_with_logits(logits.float(), y, pos_weight=pos_weight, reduction="none")
+    if sample_weight is not None:
+        l = l * sample_weight.unsqueeze(-1)          # per-study weight, broadcast over the 12 labels
+        return l.sum() / (sample_weight.sum() * l.shape[1]).clamp(min=1e-8)
+    return l.mean()
 
 def run_epoch(model, loader, opt=None, sched=None, scaler=None):
     train = opt is not None
@@ -609,8 +637,9 @@ def run_epoch(model, loader, opt=None, sched=None, scaler=None):
         if train:
             y = b["y"].to(DEVICE)
             pw = POS_WEIGHT.to(DEVICE) if (CFG.LOSS_BALANCE and POS_WEIGHT is not None) else None
-            l_bce = bce(z, y, pw)
-            l_aux = CFG.AUX_W * (bce(zg, y, pw) + bce(zl, y, pw))
+            sw = b["w"].to(DEVICE) if "w" in b else None   # per-study duplicate-report down-weighting
+            l_bce = bce(z, y, pw, sw)
+            l_aux = CFG.AUX_W * (bce(zg, y, pw, sw) + bce(zl, y, pw, sw))
             l_moe = moe_aux.float().mean()      # MoE load-balance + router z-loss (0 for HEAD_TYPE="transformer")
             loss = l_bce + l_aux + l_moe
             opt.zero_grad(set_to_none=True)
@@ -624,8 +653,8 @@ def run_epoch(model, loader, opt=None, sched=None, scaler=None):
             preds.append(torch.sigmoid(z.float()).cpu().numpy())
     return {k: v / max(n, 1) for k, v in tot.items()} if train else np.concatenate(preds)
 
-def loader(idx, y=None, train=False):
-    ds = KneeDS(VOL, MASK, idx, y, train)
+def loader(idx, y=None, train=False, w=None):
+    ds = KneeDS(VOL, MASK, idx, y, train, w)
     return torch.utils.data.DataLoader(ds, batch_size=CFG.BATCH if train else CFG.BATCH * 2, shuffle=train,
                                        num_workers=CFG.NUM_WORKERS, pin_memory=True, drop_last=train)
 
@@ -675,6 +704,16 @@ if CFG.MODE == "train":
         pw = np.clip(neg_n / np.clip(pos_n, 1, None), 1.0, 20.0)   # capped: avoids unstable gradients on rare labels
         POS_WEIGHT = torch.tensor(pw, dtype=torch.float32)
         print("pos_weight per label:", dict(zip(LABELS, pw.round(2).tolist())))
+    W = None
+    if CFG.DEDUP_WEIGHT:
+        # docs/data_audit.md finding 5: verbatim-duplicate ("template") reports collapse to the same
+        # silver label regardless of imaging differences, so down-weight (not drop -- the image still
+        # varies) studies that share their exact report text with others. sqrt softens the down-weight
+        # (a report shared by 37 studies gets weight 1/sqrt(37)=0.16, not 1/37=0.03).
+        dup_count = train.Report.map(train.Report.value_counts()).values[pool]
+        W = (1.0 / np.sqrt(np.clip(dup_count, 1, None))).astype(np.float32)
+        print(f"DEDUP_WEIGHT: {(dup_count > 1).sum()}/{len(pool)} pool studies share a duplicate report "
+             f"template; weight range [{W.min():.3f}, {W.max():.3f}]")
     oof = np.full(Yp.shape, np.nan, np.float32); gold_preds = []; fold_times = []
     for f in CFG.TRAIN_FOLDS:
         t = time.time(); seed_all(CFG.SEED + f)
@@ -686,7 +725,7 @@ if CFG.MODE == "train":
         head_p = [p for p in core.parameters() if id(p) not in enc_ids]
         opt = torch.optim.AdamW([{"params": enc_p, "lr": CFG.LR_BACKBONE}, {"params": head_p, "lr": CFG.LR_HEAD}],
                                 weight_decay=CFG.WD)
-        dl = loader(tr, Yp[folds != f], train=True)
+        dl = loader(tr, Yp[folds != f], train=True, w=(W[folds != f] if W is not None else None))
         sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[CFG.LR_BACKBONE, CFG.LR_HEAD],
                                                     total_steps=CFG.EPOCHS * len(dl), pct_start=0.1)
         scaler = torch.amp.GradScaler(enabled=CFG.AMP and DEVICE.type == "cuda")

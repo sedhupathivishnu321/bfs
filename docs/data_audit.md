@@ -65,7 +65,34 @@ and content (label distribution, resolution, report duplication).
 The dataset is structurally very clean — no leakage, no corruption, no missing files. The deviations
 are in *content*, not *integrity*: a redundant metadata column, heterogeneous native resolution, and a
 meaningful cluster of template/duplicate reports that quietly reduces the effective diversity of the
-4,349-study silver-labelled pool below its raw count. None of these findings change any measured
-number already reported in this repository; they identify where future work (e.g. de-duplicating
-near-identical reports before computing per-language error breakdowns, or an alternative series-choice
-signal beyond `Fluid_Sensitive`/`Fat_Suppression`) could plausibly matter.
+4,349-study silver-labelled pool below its raw count.
+
+## Response: what was fixed vs. deliberately left as documentation
+
+* **Finding 3 (slice-sampling duplication): fixed.** `pick_slice_indices()`
+  ([`src/kneemor/ingest.py`](../src/kneemor/ingest.py), inlined in the Kaggle notebook) replaces the plain
+  `np.linspace(...).round()` with a version that is guaranteed unique when a series has at least as many
+  slices as the target depth, and pads short series by repeating the last slice — an explicit, symmetric
+  policy in place of whatever a rounding collision happened to duplicate before. Standalone-verified for
+  every `n` in 1..320 against depths 16 and 24 (the two depths this repo uses).
+* **Finding 5 (template reports): addressed via down-weighting, not deduplication.** `CFG.DEDUP_WEIGHT`
+  (default `True`, Kaggle notebook) weights each pool study's loss contribution by
+  `1/sqrt(duplicate_count)`: a study whose report is one of 37 identical copies gets weight ≈0.16, a
+  unique report keeps weight 1. Down-weighting rather than dropping was chosen deliberately: the *images*
+  behind a shared report template still differ (different knees, different patients), so there is still
+  some independent image-side signal to learn from, even if the label-side signal is less independent
+  than the raw study count implies; `sqrt` (rather than a full `1/count`) softens the effect for the same
+  reason. This is a new, **unmeasured** change — it has not yet been run.
+* **Finding 1 (`Fluid_Sensitive`/`Fat_Suppression` redundancy): documentation only, deliberately not
+  "fixed."** A better series tie-break would need a genuinely independent second signal (e.g. slice count
+  or native resolution) from the series-level metadata, and nothing in this repository's code confirms
+  `{split}_series.csv` carries such a column — only `Anatomical_Plane`, `Fluid_Sensitive`,
+  `Fat_Suppression`, `StudyInstanceUID` and `SeriesInstanceUID` are ever read from it. Adding a tie-break
+  keyed on an unverified column would risk a `KeyError` on Kaggle's actual schema, which cannot be checked
+  from this authoring environment (no access to the real competition data). Left as a documented
+  limitation and a comment at the point of use, not a silent assumption.
+* **Findings 2, 4, 6: documentation only.** Resolution heterogeneity (2) is partially mitigated already
+  by both pipelines' use of `cv2.INTER_AREA` for downsampling (the correct anti-aliasing choice for
+  shrinking images), and a fuller fix (resolution-adaptive processing) is a larger redesign outside this
+  round's scope. Finding 4 confirms existing documentation rather than contradicting it. Finding 6 is a
+  consequence of finding 1 rather than a separately actionable item.

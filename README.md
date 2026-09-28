@@ -761,7 +761,16 @@ in place** — and to report whatever that measurement turns out to be, includin
 
 * **The silver pool's effective diversity is below its raw 4,349-study count** ([`docs/data_audit.md`](docs/data_audit.md)):
   46 distinct report texts repeat verbatim across 177 studies (worst case: one Turkish template in 37
-  studies), so those studies contribute fewer independent label signals than their count suggests.
+  studies), so those studies contribute fewer independent label signals than their count suggests. The
+  Kaggle notebook now addresses this (`CFG.DEDUP_WEIGHT`, default on: down-weights each such study's loss
+  contribution by `1/sqrt(duplicate count)` rather than dropping it, since the image still varies even when
+  the report doesn't) — this is a new, **unmeasured** change, not yet run on GPU.
+* **Slice sampling for short series is fixed, but was a real duplication artifact before this update.**
+  Series range 11–320 slices against a fixed sample depth (16 Kaggle / 24 CPU study); the previous
+  `np.linspace(...).round()` could round two target positions to the same source index for the
+  shortest series. `pick_slice_indices()` now guarantees unique indices whenever enough slices exist and
+  pads short series by repeating the last slice explicitly (standalone-verified for every slice count 1–320
+  against both depths this repo uses; see [`docs/data_audit.md`](docs/data_audit.md)).
 * **Series selection relies on what is effectively one signal, not two.** `Fluid_Sensitive` and
   `Fat_Suppression` are 100% correlated in this cohort, so `select_series()`'s weighted score is closer to
   weighting one flag 3x than combining independent evidence — and it is consequential, not a rare tie-break,
@@ -830,6 +839,8 @@ notebooks/rsna_knee_kaggle_e5_all_proposed.executed.ipynb  E5 measured run (+ al
 results/kaggle_gpu_run/comparison.csv                  the three runs side by side
 results/kaggle_gpu_run/e{0,1,5}_*/{metrics.json,per_label.csv}   each run's full numbers, extracted for grepping
 scripts/test_iterative_stratify.py                     standalone test for the fold-assignment fix (§3.2)
+scripts/test_pick_slice_indices.py                      standalone test for the slice-sampling fix (§7, data_audit.md)
+docs/data_audit.md                                      dataset audit + which findings were fixed vs. documented-only
 ```
 
 ## 10. Wall-clock cost of this study

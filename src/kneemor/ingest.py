@@ -90,6 +90,29 @@ def slice_position(ds) -> float:
         return float(getattr(ds, "InstanceNumber", 0))
 
 
+def pick_slice_indices(n: int, depth: int):
+    """Choose `depth` slice indices out of `n` available, in [0, n).
+
+    Replaces a plain ``np.linspace(0, n-1, depth).round()``, which is fine when
+    n >> depth but can round two evenly-spaced target positions to the same
+    integer index near the ends of a short series (docs/data_audit.md finding
+    3: series range 11-320 slices, median 30, against a fixed depth of 16-24).
+    * n >= depth: evenly spaced and **guaranteed unique** (any rounding
+      collision is repaired by inserting the midpoint of the largest gap).
+    * n < depth: every available slice is kept, then padded by repeating the
+      *last* slice -- an explicit, symmetric policy, in place of whichever
+      slices happened to fall on a rounding collision before.
+    """
+    if n >= depth:
+        idx = np.unique(np.round(np.linspace(0, n - 1, depth)).astype(int))
+        while len(idx) < depth:
+            gaps = np.diff(idx)
+            j = int(np.argmax(gaps))
+            idx = np.unique(np.insert(idx, j + 1, (idx[j] + idx[j + 1]) // 2))
+        return idx[:depth]
+    return np.concatenate([np.arange(n), np.full(depth - n, n - 1, dtype=int)])
+
+
 def volume_from_dicoms(blobs: list[bytes], depth: int, size: int):
     # pass 1: headers only (cheap) -> geometry; pass 2: decode just the `depth` selected slices
     slices = []
@@ -106,7 +129,7 @@ def volume_from_dicoms(blobs: list[bytes], depth: int, size: int):
     shp = pd.Series([s[1] for s in slices]).value_counts().index[0]
     slices = sorted([s for s in slices if s[1] == shp], key=lambda s: s[0])
     n = len(slices)
-    idx = np.linspace(0, n - 1, depth).round().astype(int)
+    idx = pick_slice_indices(n, depth)
     imgs = []
     for i in idx:
         try:
