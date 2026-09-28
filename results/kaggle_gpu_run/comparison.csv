@@ -1,0 +1,4 @@
+run,head_type,pooling,readout,fusion,loss_balance,params_millions,oof_macro_auc,gold_macro_auc,gold_auc_ci_lo,gold_auc_ci_hi,gold_accuracy_LOO,wall_clock_minutes_5folds_1gpu
+e0_transformer,transformer,mean,linear,fixed,False,5.73,0.8336,0.7689,0.7155,0.8154,0.7155,128.3
+e1_more_only,more,mean,linear,fixed,False,5.99,0.8441,0.7784,0.7279,0.8274,0.7299,168.9
+e5_all_proposed,more,attention,shared_mlp,learned,True,6.06,0.8377,0.7757,0.7205,0.8266,0.7371,182.4

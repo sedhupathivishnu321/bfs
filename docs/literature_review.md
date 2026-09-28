@@ -102,13 +102,17 @@ tokens, with MoR token routing and label-query decoding (**MV-MoR**), will:
 * **H3** use fewer FLOPs than full-depth recursion without a significant loss in AUC;
 * **H4** beat sagittal-only input, since ACL/OA/effusion evidence is not confined to one plane.
 
-**Extension hypothesis (MV-MoRE, this update).** Replacing the block's single FFN with a sparse top-k
-Mixture-of-Experts FFN, trained with a switch-style load-balancing loss and an ST-MoE router z-loss:
+**Extension hypothesis (MV-MoRE).** Replacing the block's single FFN with a sparse top-k Mixture-of-Experts
+FFN, trained with a switch-style load-balancing loss and an ST-MoE router z-loss:
 
-* **H5** raises macro AUC on the labels the single-FFN MV-MoR is weakest on (focal/small structures: Medial
-  Meniscus, MCL, Synovitis) more than on labels it is already strong on (diffuse: Medial OA, Effusion),
-  consistent with experts specialising by finding type, **without** a statistically significant FLOPs or
-  latency increase relative to MV-MoR, since the head remains under 1M parameters against a backbone that is
-  three to four orders of magnitude larger in compute (README §5.5, §5.8). This is a **hypothesis to be
-  tested by `bash scripts/run_experiments.sh`** (models `mvmore*`, `hybrid_more`); it is not yet measured
-  (see README "Proposed extension: MV-MoRE").
+* **H5, partially supported (measured once on Kaggle GPU, not yet on the CPU study — see README §3.1).**
+  MV-MoRE raised gold macro AUC by +0.009 and OOF macro AUC by +0.010 over the single-FFN head, and MCL (one
+  of the three predicted-weakest labels) gained substantially (+0.095 gold AUC). But **Synovitis, another
+  predicted-weakest label, lost AUC (−0.043)** — so the clean version of H5 ("every weak label benefits from
+  expert specialisation") is falsified, while the weaker version ("net macro AUC improves") holds on this one
+  run. The wall-clock cost (+32% for 5 folds) was also larger than the FLOPs-share argument (head is
+  three to four orders of magnitude smaller than the backbone's compute) predicted, because that argument is
+  about FLOPs, not about the unbatched, Python-loop-based dispatch `MoEFFN` currently uses — see README §3.1
+  for the corrected claim. The CPU-study version of this hypothesis (models `mvmore*`, `hybrid_more`, tested
+  via `bash scripts/run_experiments.sh` against the frozen-backbone baselines with 3 seeds and bootstrap CIs)
+  remains untested.

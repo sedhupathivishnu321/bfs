@@ -1,0 +1,31 @@
+{
+  "_provenance": "Measured by the user on Kaggle (1 GPU, torch 2.5.1+cu121, timm 1.0.29) from an intermediate version of notebooks/build_kaggle_notebook.py that had CFG.HEAD_TYPE but not yet CFG.POOLING/READOUT/FUSION/LOSS_BALANCE. So this run isolates MV-MoRE alone against the e0_transformer baseline: identical data, folds, backbone, pooling (mean), readout (linear), fusion (fixed 0.5/0.5), and unweighted loss -- only the local mixer changed (2-layer unshared transformer -> MV-MoRE). Full executed notebook not committed verbatim (see repo history for the equivalent); this file is transcribed from its cell outputs.",
+  "config": {
+    "BACKBONE": "tf_efficientnet_b0.ns_jft_in1k",
+    "SLICES": 16,
+    "IMG": 224,
+    "D_MODEL": 256,
+    "HEAD_TYPE": "more",
+    "MOR_RECURSIONS": 3,
+    "MOE_EXPERTS": 4,
+    "MOE_TOPK": 2,
+    "FOLDS": 5,
+    "EPOCHS": 12,
+    "BATCH": 4,
+    "LR_BACKBONE": 0.0002,
+    "LR_HEAD": 0.001,
+    "WD": 0.01,
+    "AUX_W": 0.5,
+    "USE_LLM_LABELS": false,
+    "label_source": "rules"
+  },
+  "params_millions": 5.99,
+  "labeler_gold_auc": 0.7347992674243865,
+  "oof_macro_auc": 0.8441139313940376,
+  "gold_macro_auc": 0.7783879039329943,
+  "gold_auc_95ci": [0.7279262146413475, 0.8274317403486109],
+  "gold_accuracy_LOO_thresholds": 0.7298850574712644,
+  "gold_accuracy_all_negative": 0.6551724137931034,
+  "per_fold_gold_auc": {"fold0": 0.7734, "fold1": 0.7695, "fold2": 0.7444, "fold3": 0.7731, "fold4": 0.7228},
+  "wall_clock_minutes_5folds_1gpu": 168.9
+}

@@ -15,6 +15,7 @@
     "USE_LLM_LABELS": false,
     "label_source": "rules"
   },
+  "params_millions": 5.73,
   "labeler_gold_auc": 0.7347992674243865,
   "oof_macro_auc": 0.833575836653504,
   "gold_macro_auc": 0.7688587292315859,

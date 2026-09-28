@@ -1,0 +1,13 @@
+label,gold_auc,gold_acc_LOO,oof_auc
+ACL,0.8370,0.7241,0.8699
+MCL,0.8231,0.7586,0.7911
+Medial Meniscus,0.6827,0.5345,0.8234
+Lateral Meniscus,0.7677,0.7414,0.7607
+Medial OA,0.8171,0.8793,0.8651
+Lateral OA,0.7427,0.7586,0.8302
+PF OA,0.7207,0.7759,0.8478
+Effusion,0.7615,0.7414,0.8675
+Synovitis,0.6022,0.4828,0.8962
+Baker's,0.9366,0.9138,0.8877
+Contusion,0.8313,0.8103,0.8308
+Fracture,0.8181,0.6379,0.8588
