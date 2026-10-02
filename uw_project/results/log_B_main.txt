@@ -28,3 +28,5 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [  1150s] within  s2 GRU                          MAEg1s=0.5961 MAEd1s=0.2009
 [  1190s] within  s2 TCN                          MAEg1s=0.5871 MAEd1s=0.1955
 [  1294s] within  s2 Transformer                  MAEg1s=0.6037 MAEd1s=0.1886
+[  1352s] within  s2 PCT (proposed)               MAEg1s=0.5909 MAEd1s=0.1881
+done 1351.6269516944885

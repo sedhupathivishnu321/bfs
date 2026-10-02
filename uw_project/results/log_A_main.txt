@@ -30,3 +30,6 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [  1260s] blue    s0 GRU                          MAEg1s=0.6798 MAEd1s=0.1193
 [  1269s] blue    s0 TCN                          MAEg1s=0.6845 MAEd1s=0.1196
 [  1309s] blue    s0 Transformer                  MAEg1s=0.6650 MAEd1s=0.1147
+[  1329s] blue    s0 PCT (proposed)               MAEg1s=0.6540 MAEd1s=0.1301
+[  1329s] blue    s1 Persistence                  MAEg1s=0.6752 MAEd1s=0.1154
+[  1330s] blue    s1 AR(ridge)                    MAEg1s=0.7168 MAEd1s=0.1374
