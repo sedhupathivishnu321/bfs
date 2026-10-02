@@ -3,3 +3,28 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 /usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 9.022720348639268e-08.
   return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
 [     2s] within  s0 AR(ridge)                    MAEg1s=0.6222 MAEd1s=0.1971
+[   428s] within  s0 GBM                          MAEg1s=0.5712 MAEd1s=0.1851
+[   453s] within  s0 LSTM                         MAEg1s=0.6015 MAEd1s=0.2036
+[   475s] within  s0 GRU                          MAEg1s=0.5879 MAEd1s=0.1989
+[   495s] within  s0 TCN                          MAEg1s=0.5825 MAEd1s=0.1929
+[   620s] within  s0 Transformer                  MAEg1s=0.6224 MAEd1s=0.1926
+[   708s] within  s0 PCT (proposed)               MAEg1s=0.5962 MAEd1s=0.1891
+[   708s] within  s1 Persistence                  MAEg1s=0.6631 MAEd1s=0.2128
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 9.022720348639268e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[   708s] within  s1 AR(ridge)                    MAEg1s=0.6222 MAEd1s=0.1971
+[   815s] within  s1 GBM                          MAEg1s=0.5712 MAEd1s=0.1851
+[   837s] within  s1 LSTM                         MAEg1s=0.6109 MAEd1s=0.2047
+[   864s] within  s1 GRU                          MAEg1s=0.6090 MAEd1s=0.2004
+[   885s] within  s1 TCN                          MAEg1s=0.5850 MAEd1s=0.1936
+[  1002s] within  s1 Transformer                  MAEg1s=0.5911 MAEd1s=0.1939
+[  1039s] within  s1 PCT (proposed)               MAEg1s=0.5886 MAEd1s=0.1869
+[  1039s] within  s2 Persistence                  MAEg1s=0.6631 MAEd1s=0.2128
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 9.022720348639268e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[  1040s] within  s2 AR(ridge)                    MAEg1s=0.6222 MAEd1s=0.1971
+[  1106s] within  s2 GBM                          MAEg1s=0.5712 MAEd1s=0.1851
+[  1127s] within  s2 LSTM                         MAEg1s=0.5951 MAEd1s=0.2022
+[  1150s] within  s2 GRU                          MAEg1s=0.5961 MAEd1s=0.2009
+[  1190s] within  s2 TCN                          MAEg1s=0.5871 MAEd1s=0.1955
+[  1294s] within  s2 Transformer                  MAEg1s=0.6037 MAEd1s=0.1886

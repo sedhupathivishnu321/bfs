@@ -1,3 +1,32 @@
 recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [     2s] black   s0 Persistence                  MAEg1s=0.0423 MAEd1s=0.0031
 [     3s] black   s0 AR(ridge)                    MAEg1s=0.2478 MAEd1s=0.0758
+[   428s] black   s0 GBM                          MAEg1s=0.0785 MAEd1s=0.0122
+[   440s] black   s0 LSTM                         MAEg1s=0.0566 MAEd1s=0.0347
+[   459s] black   s0 GRU                          MAEg1s=0.1090 MAEd1s=0.0573
+[   482s] black   s0 TCN                          MAEg1s=0.2217 MAEd1s=0.1216
+[   556s] black   s0 Transformer                  MAEg1s=0.1660 MAEd1s=0.0917
+[   580s] black   s0 PCT (proposed)               MAEg1s=0.0457 MAEd1s=0.0086
+[   580s] black   s1 Persistence                  MAEg1s=0.0423 MAEd1s=0.0031
+[   581s] black   s1 AR(ridge)                    MAEg1s=0.2478 MAEd1s=0.0758
+[   681s] black   s1 GBM                          MAEg1s=0.0785 MAEd1s=0.0122
+[   692s] black   s1 LSTM                         MAEg1s=0.0495 MAEd1s=0.0264
+[   726s] black   s1 GRU                          MAEg1s=0.3007 MAEd1s=0.1354
+[   762s] black   s1 TCN                          MAEg1s=0.0857 MAEd1s=0.0652
+[   850s] black   s1 Transformer                  MAEg1s=0.1087 MAEd1s=0.0895
+[   894s] black   s1 PCT (proposed)               MAEg1s=0.0743 MAEd1s=0.0142
+[   894s] black   s2 Persistence                  MAEg1s=0.0423 MAEd1s=0.0031
+[   894s] black   s2 AR(ridge)                    MAEg1s=0.2478 MAEd1s=0.0758
+[   954s] black   s2 GBM                          MAEg1s=0.0785 MAEd1s=0.0122
+[   967s] black   s2 LSTM                         MAEg1s=0.0556 MAEd1s=0.0350
+[   983s] black   s2 GRU                          MAEg1s=0.0646 MAEd1s=0.0627
+[  1001s] black   s2 TCN                          MAEg1s=0.0602 MAEd1s=0.0217
+[  1106s] black   s2 Transformer                  MAEg1s=0.1012 MAEd1s=0.0720
+[  1153s] black   s2 PCT (proposed)               MAEg1s=0.1371 MAEd1s=0.0595
+[  1154s] blue    s0 Persistence                  MAEg1s=0.6752 MAEd1s=0.1154
+[  1154s] blue    s0 AR(ridge)                    MAEg1s=0.7168 MAEd1s=0.1374
+[  1240s] blue    s0 GBM                          MAEg1s=0.6605 MAEd1s=0.1270
+[  1247s] blue    s0 LSTM                         MAEg1s=0.6750 MAEd1s=0.1165
+[  1260s] blue    s0 GRU                          MAEg1s=0.6798 MAEd1s=0.1193
+[  1269s] blue    s0 TCN                          MAEg1s=0.6845 MAEd1s=0.1196
+[  1309s] blue    s0 Transformer                  MAEg1s=0.6650 MAEd1s=0.1147
