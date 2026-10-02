@@ -8,3 +8,11 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [   506s] within  s0 - cross-receiver ctx         MAEg1s=0.5654 MAEd1s=0.1813
 [   597s] within  s0 - absolute level             MAEg1s=0.5949 MAEd1s=0.1861
 [   667s] within  s0 gain-only inputs             MAEg1s=0.6170 MAEd1s=0.2106
+[   702s] within  s0 narrow (h=16)                MAEg1s=0.5813 MAEd1s=0.1869
+[   783s] within  s0 wide (h=64)                  MAEg1s=0.5846 MAEd1s=0.1936
+[   809s] within  s0 shallow (dil 1,4)            MAEg1s=0.5821 MAEd1s=0.1857
+[   862s] within  s1 PCT full                     MAEg1s=0.5886 MAEd1s=0.1869
+[   981s] within  s1 - AR prior                   MAEg1s=0.5797 MAEd1s=0.1900
+[  1057s] within  s1 - gating                     MAEg1s=0.5810 MAEd1s=0.1956
+[  1142s] within  s1 - depthwise-sep (dense conv) MAEg1s=0.6184 MAEd1s=0.1981
+[  1243s] within  s1 - heteroscedastic head       MAEg1s=0.5819 MAEd1s=0.1889
