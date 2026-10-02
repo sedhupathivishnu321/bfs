@@ -19,3 +19,15 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [  1302s] within  s1 - attention pooling          MAEg1s=0.5649 MAEd1s=0.1852
 [  1357s] within  s1 - cross-receiver ctx         MAEg1s=0.5662 MAEd1s=0.1837
 [  1432s] within  s1 - absolute level             MAEg1s=0.5908 MAEd1s=0.1921
+[  1525s] within  s1 gain-only inputs             MAEg1s=0.6160 MAEd1s=0.2076
+[  1595s] within  s1 narrow (h=16)                MAEg1s=0.5736 MAEd1s=0.1902
+[  1686s] within  s1 wide (h=64)                  MAEg1s=0.5855 MAEd1s=0.1847
+[  1716s] within  s1 shallow (dil 1,4)            MAEg1s=0.5857 MAEd1s=0.1871
+[  1762s] within  s2 PCT full                     MAEg1s=0.5909 MAEd1s=0.1881
+[  1821s] within  s2 - AR prior                   MAEg1s=0.6049 MAEd1s=0.1932
+[  1896s] within  s2 - gating                     MAEg1s=0.5865 MAEd1s=0.1890
+[  1949s] within  s2 - depthwise-sep (dense conv) MAEg1s=0.5895 MAEd1s=0.1989
+[  2057s] within  s2 - heteroscedastic head       MAEg1s=0.6133 MAEd1s=0.1968
+[  2153s] within  s2 - attention pooling          MAEg1s=0.5696 MAEd1s=0.1854
+[  2209s] within  s2 - cross-receiver ctx         MAEg1s=0.5707 MAEd1s=0.1851
+[  2247s] within  s2 - absolute level             MAEg1s=0.5975 MAEd1s=0.1870
