@@ -56,12 +56,13 @@ class PCTNet(nn.Module):
     mean = gated( linear AR/extrapolation prior over own history )  +  gate * nonlinear residual (dilated DS-conv encoder)
     + heteroscedastic log-variance head for calibrated uncertainty.
     Flags allow controlled ablation of each component."""
-    def __init__(s, fin, out, L=48, h=32, dil=(1, 2, 4, 8), prior=True, gate=True, sep=True, hetero=True, pool=True, n_own=None, **k):
+    def __init__(s, fin, out, L=48, h=32, dil=(1, 2, 4, 8), prior=True, gate=True, sep=True, hetero=True, pool=True, n_own=None, drop=0.0, **k):
         super().__init__()
         s.prior_on, s.pool_on = prior, pool
         s.inp = nn.Conv1d(fin, h, 1)
         s.blocks = nn.ModuleList([DSBlock(h, d, gate, sep) for d in dil])
         s.att = nn.Linear(h, 1)
+        s.drop = nn.Dropout(drop)
         s.head = Head(2 * h if pool else h, out, hetero)
         n_own = n_own or fin
         s.n_own = n_own
@@ -74,7 +75,7 @@ class PCTNet(nn.Module):
         z = z.transpose(1, 2)
         last = z[:, -1]
         h = torch.cat([last, (torch.softmax(s.att(z), 1) * z).sum(1)], -1) if s.pool_on else last
-        mu, lv = s.head(h)
+        mu, lv = s.head(s.drop(h))
         if s.prior_on:
             mu = s.ar(x[:, :, :s.n_own].flatten(1)) + torch.tanh(s.alpha + 1.0) * mu
         return mu, lv

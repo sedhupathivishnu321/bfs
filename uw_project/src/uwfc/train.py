@@ -13,7 +13,7 @@ def nll(mu, lv, y):
     return (0.5 * (lv + (y - mu) ** 2 * torch.exp(-lv))).mean()
 
 
-def fit_torch(name, Xtr, Ytr, Xva, Yva, seed, epochs=40, bs=256, lr=2e-3, wd=1e-3, patience=8, hetero_w=0.3, **kw):
+def fit_torch(name, Xtr, Ytr, Xva, Yva, seed, epochs=40, bs=256, lr=2e-3, wd=1e-3, patience=8, hetero_w=0.3, loss='huber', **kw):
     """Normalised targets. Early-stop on val Huber loss. Returns best model (CPU, eval)."""
     seed_all(seed)
     kw.setdefault('n_own', NF)
@@ -22,7 +22,7 @@ def fit_torch(name, Xtr, Ytr, Xva, Yva, seed, epochs=40, bs=256, lr=2e-3, wd=1e-
     steps = epochs * int(np.ceil(len(Xtr) / bs)); sch = torch.optim.lr_scheduler.OneCycleLR(opt, lr, total_steps=steps)
     Xt, Yt, Xv, Yv = map(torch.from_numpy, (Xtr, Ytr, Xva, Yva))
     best, bs_, wait = None, 1e9, 0
-    hl = nn.SmoothL1Loss(beta=0.5)
+    hl = nn.SmoothL1Loss(beta=0.5) if loss == 'huber' else nn.L1Loss()
     for ep in range(epochs):
         m.train(); perm = torch.randperm(len(Xt))
         for i in range(0, len(Xt), bs):
