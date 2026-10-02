@@ -33,10 +33,11 @@ for proto, suite in (("A", "main"), ("B", "main"), ("A", "ablation"), ("B", "abl
             except ValueError: p = float("nan")
             P(f"  {m:30s} Δ(other-ref)={diff.mean():+.4f} dB  rel={100*diff.mean()/piv[m].mean():+.1f}%  folds ref-better={int((diff>0).sum())}/{len(diff)}  p={p:.3f}")
     # window-level paired bootstrap (pooled over folds, seed 0) of PCT vs best baseline
-    z = R / f"results/abs_err_{proto}_{suite}.npz"
-    if z.exists() and suite == "main":
-        E = np.load(z); folds = sorted({k.split("|")[0] for k in E.files})
-        def pooled(m): return np.concatenate([E[f"{fo}|0|{m}"] for fo in folds])
+    ed = R / f"results/errs/{proto}_{suite}"
+    if ed.exists() and suite == "main":
+        san = lambda m: "".join(ch if ch.isalnum() else "_" for ch in m)
+        folds = sorted(d.fold.unique())
+        def pooled(m): return np.concatenate([np.load(ed / f"{fo}__0__{san(m)}.npy") for fo in folds])
         base = fm.groupby("model")["MAE_gain_1.0s"].mean().drop([ref]).idxmin()
         a_, b_ = pooled(ref), pooled(base); rng = np.random.default_rng(0)
         blk = 40; nb = len(a_) // blk; A = a_[:nb * blk].reshape(nb, blk).mean(1); Bm = b_[:nb * blk].reshape(nb, blk).mean(1)  # block bootstrap (temporal autocorr)

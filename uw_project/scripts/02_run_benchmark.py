@@ -12,7 +12,7 @@ from uwfc import data as D, baselines as B, metrics as M, train as T
 ap = argparse.ArgumentParser()
 ap.add_argument("--protocol", default="A"); ap.add_argument("--suite", default="main", choices=["main", "ablation"])
 ap.add_argument("--seeds", type=int, default=3); ap.add_argument("--epochs", type=int, default=25)
-ap.add_argument("--folds", default="")  # comma list of test sites (A) to restrict
+ap.add_argument("--fresh", action="store_true"); ap.add_argument("--folds", default="")  # comma list of test sites (A) to restrict
 a = ap.parse_args()
 
 feats = {p.stem: D.load_recording(p)[0] for p in sorted((R / "data/processed/features").glob("*.npz"))}
@@ -61,6 +61,12 @@ def ablation_suite(seed):
             "gain-only inputs": P(only_gain=True), "narrow (h=16)": P(h=16), "wide (h=64)": P(h=64), "shallow (dil 1,4)": P(dil=(1, 4))}
 
 
+out_csv = R / f"results/protocol{a.protocol}_{a.suite}.csv"
+errdir = R / f"results/errs/{a.protocol}_{a.suite}"; errdir.mkdir(parents=True, exist_ok=True)
+done = {}
+if out_csv.exists() and not a.fresh:                       # resume after interruption (container restarts)
+    for r_ in pd.read_csv(out_csv).to_dict("records"): done[(str(r_["fold"]), int(r_["seed"]), r_["model"])] = r_
+def errfile(fold, seed, mname): return errdir / (f"{fold}__{seed}__" + "".join(ch if ch.isalnum() else "_" for ch in mname) + ".npy")
 rows, errs = [], {}
 t0 = time.time()
 for fold, tr, va, te in splits():
@@ -71,6 +77,9 @@ for fold, tr, va, te in splits():
     for seed in range(a.seeds):
         suite = (main_suite if a.suite == "main" else ablation_suite)(seed)
         for mname, (kind, spec) in suite.items():
+            key = (str(fold), seed, mname)
+            if key in done and (seed != 0 or errfile(fold, seed, mname).exists()):
+                rows.append(done[key]); continue
             kw = dict(spec) if kind == "nn" else {}
             use_abs, use_ctx, only_gain = kw.pop("use_abs", True), kw.pop("use_ctx", True), kw.pop("only_gain", False)
             prep = lambda d: nrm.x(d[0], d[1], d[3], use_abs, use_ctx)
@@ -88,10 +97,9 @@ for fold, tr, va, te in splits():
             r |= M.reg_metrics(Yp, Yte, S['te'], names)
             r |= {f"ev_{k}": v for k, v in M.event_metrics(Yp, Yte, S['te'], GAIN_COL, thr).items()}
             r |= M.coverage(Yp, lv, Yte, S['te'])
-            rows.append(r)
-            errs[f"{fold}|{seed}|{mname}"] = np.abs(Yp - Yte)[:, GAIN_COL] * S['te'][:, GAIN_COL]
+            rows.append(r); pd.DataFrame(rows).to_csv(out_csv, index=False)
+            np.save(errfile(fold, seed, mname), (np.abs(Yp - Yte)[:, GAIN_COL] * S['te'][:, GAIN_COL]).astype(np.float32))
             print(f"[{time.time()-t0:6.0f}s] {fold:7s} s{seed} {mname:28s} MAEg1s={r['MAE_gain_1.0s']:.4f} MAEd1s={r['MAE_delay_1.0s']:.4f}", flush=True)
-        pd.DataFrame(rows).to_csv(R / f"results/protocol{a.protocol}_{a.suite}.csv", index=False)
-np.savez_compressed(R / f"results/abs_err_{a.protocol}_{a.suite}.npz", **errs)
-pd.DataFrame(rows).to_csv(R / f"results/protocol{a.protocol}_{a.suite}.csv", index=False)
+        pd.DataFrame(rows).to_csv(out_csv, index=False)
+pd.DataFrame(rows).to_csv(out_csv, index=False)
 print("done", time.time() - t0)

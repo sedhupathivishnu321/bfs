@@ -93,3 +93,6 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [  3652s] red     s1 AR(ridge)                    MAEg1s=0.9105 MAEd1s=0.4909
 [  3834s] red     s1 GBM                          MAEg1s=0.8566 MAEd1s=0.4612
 [  3845s] red     s1 LSTM                         MAEg1s=0.9815 MAEd1s=0.5524
+recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
+[     2s] black   s0 Persistence                  MAEg1s=0.0423 MAEd1s=0.0031
+[     2s] black   s0 AR(ridge)                    MAEg1s=0.2478 MAEd1s=0.0758

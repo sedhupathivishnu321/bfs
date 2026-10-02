@@ -33,3 +33,4 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [  2247s] within  s2 - absolute level             MAEg1s=0.5975 MAEd1s=0.1870
 [  2284s] within  s2 gain-only inputs             MAEg1s=0.6154 MAEd1s=0.2095
 [  2325s] within  s2 narrow (h=16)                MAEg1s=0.5878 MAEd1s=0.1879
+recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
