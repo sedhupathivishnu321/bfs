@@ -64,3 +64,10 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [  2586s] purple  s1 GBM                          MAEg1s=0.7333 MAEd1s=0.6148
 [  2604s] purple  s1 LSTM                         MAEg1s=0.7417 MAEd1s=0.4208
 [  2626s] purple  s1 GRU                          MAEg1s=0.7384 MAEd1s=0.4381
+[  2644s] purple  s1 TCN                          MAEg1s=0.7582 MAEd1s=0.4155
+[  2722s] purple  s1 Transformer                  MAEg1s=0.6938 MAEd1s=0.4309
+[  2751s] purple  s1 PCT (proposed)               MAEg1s=0.7313 MAEd1s=0.4315
+[  2751s] purple  s2 Persistence                  MAEg1s=0.7444 MAEd1s=0.4194
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 6.669606023024244e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[  2752s] purple  s2 AR(ridge)                    MAEg1s=1.0589 MAEd1s=0.8947

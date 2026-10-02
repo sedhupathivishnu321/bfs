@@ -16,3 +16,6 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [  1057s] within  s1 - gating                     MAEg1s=0.5810 MAEd1s=0.1956
 [  1142s] within  s1 - depthwise-sep (dense conv) MAEg1s=0.6184 MAEd1s=0.1981
 [  1243s] within  s1 - heteroscedastic head       MAEg1s=0.5819 MAEd1s=0.1889
+[  1302s] within  s1 - attention pooling          MAEg1s=0.5649 MAEd1s=0.1852
+[  1357s] within  s1 - cross-receiver ctx         MAEg1s=0.5662 MAEd1s=0.1837
+[  1432s] within  s1 - absolute level             MAEg1s=0.5908 MAEd1s=0.1921
