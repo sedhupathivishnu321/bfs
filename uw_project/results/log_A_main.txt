@@ -33,3 +33,22 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [  1329s] blue    s0 PCT (proposed)               MAEg1s=0.6540 MAEd1s=0.1301
 [  1329s] blue    s1 Persistence                  MAEg1s=0.6752 MAEd1s=0.1154
 [  1330s] blue    s1 AR(ridge)                    MAEg1s=0.7168 MAEd1s=0.1374
+[  1460s] blue    s1 GBM                          MAEg1s=0.6605 MAEd1s=0.1270
+[  1468s] blue    s1 LSTM                         MAEg1s=0.6752 MAEd1s=0.1155
+[  1480s] blue    s1 GRU                          MAEg1s=0.6751 MAEd1s=0.1144
+[  1489s] blue    s1 TCN                          MAEg1s=0.6745 MAEd1s=0.1308
+[  1533s] blue    s1 Transformer                  MAEg1s=0.6771 MAEd1s=0.1138
+[  1561s] blue    s1 PCT (proposed)               MAEg1s=0.6769 MAEd1s=0.1278
+[  1561s] blue    s2 Persistence                  MAEg1s=0.6752 MAEd1s=0.1154
+[  1562s] blue    s2 AR(ridge)                    MAEg1s=0.7168 MAEd1s=0.1374
+[  1731s] blue    s2 GBM                          MAEg1s=0.6605 MAEd1s=0.1270
+[  1738s] blue    s2 LSTM                         MAEg1s=0.6791 MAEd1s=0.1152
+[  1752s] blue    s2 GRU                          MAEg1s=0.6841 MAEd1s=0.1222
+[  1762s] blue    s2 TCN                          MAEg1s=0.6824 MAEd1s=0.1213
+[  1804s] blue    s2 Transformer                  MAEg1s=0.6674 MAEd1s=0.1148
+[  1827s] blue    s2 PCT (proposed)               MAEg1s=0.6766 MAEd1s=0.1372
+[  1828s] purple  s0 Persistence                  MAEg1s=0.7444 MAEd1s=0.4194
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 6.669606023024244e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[  1829s] purple  s0 AR(ridge)                    MAEg1s=1.0589 MAEd1s=0.8947
+[  2032s] purple  s0 GBM                          MAEg1s=0.7333 MAEd1s=0.6148
