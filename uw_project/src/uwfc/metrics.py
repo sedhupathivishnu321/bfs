@@ -3,7 +3,7 @@ from sklearn.metrics import roc_auc_score
 
 
 def reg_metrics(Yp, Y, y_s, names):
-    """Errors in physical units (de-normalised by y_s)."""
+    """Errors in physical units (de-normalised by per-sample scale y_s, shape (N,6))."""
     e = (Yp - Y) * y_s
     return {f"MAE_{n}": float(np.abs(e[:, j]).mean()) for j, n in enumerate(names)} | \
            {f"RMSE_{n}": float(np.sqrt((e[:, j] ** 2).mean())) for j, n in enumerate(names)}
@@ -11,8 +11,8 @@ def reg_metrics(Yp, Y, y_s, names):
 
 def event_metrics(Yp, Y, y_s, col, thr):
     """Degradation event: true gain change at horizon `col` < thr dB. Score = -predicted change."""
-    yt = (Y[:, col] * y_s[col] < thr).astype(int)
-    sc = -Yp[:, col] * y_s[col]
+    yt = (Y[:, col] * y_s[:, col] < thr).astype(int)
+    sc = -Yp[:, col] * y_s[:, col]
     if yt.min() == yt.max(): return {}
     pred = (-sc < thr).astype(int)
     tp = ((pred == 1) & (yt == 1)).sum(); tn = ((pred == 0) & (yt == 0)).sum()

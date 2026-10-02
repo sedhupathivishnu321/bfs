@@ -11,7 +11,7 @@ from uwfc import data as D, baselines as B, metrics as M, train as T
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--protocol", default="A"); ap.add_argument("--suite", default="main", choices=["main", "ablation"])
-ap.add_argument("--seeds", type=int, default=3); ap.add_argument("--epochs", type=int, default=40)
+ap.add_argument("--seeds", type=int, default=3); ap.add_argument("--epochs", type=int, default=25)
 ap.add_argument("--folds", default="")  # comma list of test sites (A) to restrict
 a = ap.parse_args()
 
@@ -28,7 +28,7 @@ def stack(parts):
     return tuple(np.concatenate(z) for z in zip(*parts))
 
 
-def windows(codes, lo=0.0, hi=1.0, stride=2):
+def windows(codes, lo=0.0, hi=1.0, stride=4):
     out = []
     for c in codes:
         F = feats[c]; T_ = len(F); out.append(D.make_windows(F, int(lo * T_), int(hi * T_), stride))
@@ -66,7 +66,8 @@ t0 = time.time()
 for fold, tr, va, te in splits():
     if tr is None or va is None or te is None: print("skip fold", fold); continue
     nrm = D.Norm().fit(*tr)
-    thr = float(np.percentile(tr[2][:, GAIN_COL], 15))
+    thr = float(np.percentile(tr[2][:, GAIN_COL], 15))          # physical dB threshold from TRAIN only
+    S = {k: nrm.tgt_scale(v[0]) for k, v in (('tr', tr), ('va', va), ('te', te))}
     for seed in range(a.seeds):
         suite = (main_suite if a.suite == "main" else ablation_suite)(seed)
         for mname, (kind, spec) in suite.items():
@@ -77,18 +78,18 @@ for fold, tr, va, te in splits():
             if only_gain:
                 keep = lambda X: X[..., [0, D.NF, 2 * D.NF] if use_ctx and use_abs else [0]]
                 Xtr, Xva, Xte = map(keep, (Xtr, Xva, Xte)); kw["n_own"] = 1
-            Ytr, Yva, Yte = tr[2] / nrm.y_s, va[2] / nrm.y_s, te[2] / nrm.y_s
+            Ytr, Yva, Yte = tr[2] / S['tr'], va[2] / S['va'], te[2] / S['te']
             t1 = time.time(); lv = None
             if kind == "sk":
                 m = spec().fit(Xtr, Ytr); Yp = m.predict(Xte)
             else:
                 nm = kw.pop("name"); m = T.fit_torch(nm, Xtr, Ytr, Xva, Yva, seed, epochs=a.epochs, **kw); Yp, lv = T.predict_torch(m, Xte)
             r = dict(protocol=a.protocol, suite=a.suite, fold=fold, seed=seed, model=mname, n_train=len(Xtr), n_test=len(Xte), fit_s=time.time() - t1)
-            r |= M.reg_metrics(Yp, Yte, nrm.y_s, names)
-            r |= {f"ev_{k}": v for k, v in M.event_metrics(Yp, Yte, nrm.y_s, GAIN_COL, thr).items()}
-            r |= M.coverage(Yp, lv, Yte, nrm.y_s)
+            r |= M.reg_metrics(Yp, Yte, S['te'], names)
+            r |= {f"ev_{k}": v for k, v in M.event_metrics(Yp, Yte, S['te'], GAIN_COL, thr).items()}
+            r |= M.coverage(Yp, lv, Yte, S['te'])
             rows.append(r)
-            errs[f"{fold}|{seed}|{mname}"] = np.abs(Yp - Yte)[:, GAIN_COL] * nrm.y_s[GAIN_COL]
+            errs[f"{fold}|{seed}|{mname}"] = np.abs(Yp - Yte)[:, GAIN_COL] * S['te'][:, GAIN_COL]
             print(f"[{time.time()-t0:6.0f}s] {fold:7s} s{seed} {mname:28s} MAEg1s={r['MAE_gain_1.0s']:.4f} MAEd1s={r['MAE_delay_1.0s']:.4f}", flush=True)
         pd.DataFrame(rows).to_csv(R / f"results/protocol{a.protocol}_{a.suite}.csv", index=False)
 np.savez_compressed(R / f"results/abs_err_{a.protocol}_{a.suite}.npz", **errs)

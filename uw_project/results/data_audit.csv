@@ -1,10 +1,15 @@
 code,site,frames,receivers,taps,duration_s,fs_time,fc_hz,nonfinite_features,gain_mean_db,gain_std_db,description
+black,black,4569,8,176,36.552,125.0,18000.0,0,-3.0438225269317627,0.5444296598434448,Mariana Trench; dT/dR/dW: 6m/8717m/8720m; d: 8.72km; fc: 18kHz; l: circular
 blue_1,blue,2553,12,320,52.28544,48.828125,13000.0,0,-3.2713444232940674,1.539940595626831,North Atlantic; dT/dR/dW: 30m-60m/50m/100m; d: 3-7km; fc: 13kHz; l: 12cm
 blue_10,blue,2553,12,320,52.28544,48.828125,13000.0,0,-3.411125898361206,1.8292030096054077,North Atlantic; dT/dR/dW: 30m-60m/50m/100m; d: 3-7km; fc: 13kHz; l: 12cm
 blue_2,blue,2553,12,320,52.28544,48.828125,13000.0,0,-3.6560399532318115,2.4174277782440186,North Atlantic; dT/dR/dW: 30m-60m/50m/100m; d: 3-7km; fc: 13kHz; l: 12cm
 blue_3,blue,2553,12,320,52.28544,48.828125,13000.0,0,-3.275405168533325,1.5156468152999878,North Atlantic; dT/dR/dW: 30m-60m/50m/100m; d: 3-7km; fc: 13kHz; l: 12cm
+blue_4,blue,2553,12,320,52.28544,48.828125,13000.0,0,-3.2931110858917236,1.5856589078903198,North Atlantic; dT/dR/dW: 30m-60m/50m/100m; d: 3-7km; fc: 13kHz; l: 12cm
 blue_5,blue,2553,12,320,52.28544,48.828125,13000.0,0,-3.2664904594421387,1.4970053434371948,North Atlantic; dT/dR/dW: 30m-60m/50m/100m; d: 3-7km; fc: 13kHz; l: 12cm
+purple_10,purple,3474,12,430,53.36064,65.10416666666667,12500.0,0,-3.6110422611236572,2.2025277614593506,"North Atlantic; dT/dR/dW: 11m/10m/15m; d: 60m (cross, 32 elements, SE/SW), 200m (vertical 24 elements, SE/SW), 1km (vertical 12 elements, SE); fc: 12.5kHz; 3.75cm (cross), 5cm (vertical), 12cm (vertical)"
+purple_5,purple,3474,12,430,53.36064,65.10416666666667,12500.0,0,-3.6172890663146973,2.2051448822021484,"North Atlantic; dT/dR/dW: 11m/10m/15m; d: 60m (cross, 32 elements, SE/SW), 200m (vertical 24 elements, SE/SW), 1km (vertical 12 elements, SE); fc: 12.5kHz; 3.75cm (cross), 5cm (vertical), 12cm (vertical)"
 red_1,red,4588,3,768,47.791666666666664,96.0,25000.0,0,-3.2839691638946533,1.5167657136917114,Singapore; dT/dR/dW: 6m/4.6m/8-15m; d: 0.1-0.4; fc: 25kHz; l: 80cm
 red_2,red,4588,3,768,47.791666666666664,96.0,25000.0,0,-3.2769417762756348,1.5189087390899658,Singapore; dT/dR/dW: 6m/4.6m/8-15m; d: 0.1-0.4; fc: 25kHz; l: 80cm
 red_3,red,4588,3,768,47.791666666666664,96.0,25000.0,0,-3.1177659034729004,0.9558266997337341,Singapore; dT/dR/dW: 6m/4.6m/8-15m; d: 0.1-0.4; fc: 25kHz; l: 80cm
 red_4,red,4588,3,768,47.791666666666664,96.0,25000.0,0,-3.1324214935302734,1.0243607759475708,Singapore; dT/dR/dW: 6m/4.6m/8-15m; d: 0.1-0.4; fc: 25kHz; l: 80cm
+yellow_4,yellow,3256,24,188,52.096,62.5,13000.0,0,-3.253009557723999,1.466471791267395,Hawaii; dT/dR/dW: 50m/50m/100m; d: 7km; fc: 13kHz; l: 20cm

@@ -1,8 +1,8 @@
-import time, copy, numpy as np, torch, torch.nn as nn
+import os, time, copy, numpy as np, torch, torch.nn as nn
 from .models import make_model
 from .data import NF
 
-torch.set_num_threads(4)
+torch.set_num_threads(int(os.environ.get('UWFC_THREADS', 4)))
 
 
 def seed_all(s):

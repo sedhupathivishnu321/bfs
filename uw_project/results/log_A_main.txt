@@ -1,0 +1,3 @@
+recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
+[     2s] black   s0 Persistence                  MAEg1s=0.0423 MAEd1s=0.0031
+[     3s] black   s0 AR(ridge)                    MAEg1s=0.2478 MAEd1s=0.0758
