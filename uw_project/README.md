@@ -1,26 +1,34 @@
-# Underwater channel forecasting on real measured data – PCT / PCT-E
+# Underwater channel forecasting and hybrid acoustic–optical control
 
-Complete, reproducible pipeline: real data download → verification → featurisation → leakage-safe splits → baselines → proposed compact network (PCT) and ensemble (PCT-E) → ablations → uncertainty → robustness → scalability → figures → report.
+Two parts, kept strictly separate because their evidence is different:
 
-**Read first:** `results/FINAL_REPORT.md` (all measured numbers, generated from CSVs), `docs/LIMITATIONS.md`, `results/plots/INDEX.md` (status of each of the 70 requested figures).
+| | Part I – **measured** | Part II – **simulated** |
+|---|---|---|
+| Data | 14 real acoustic channel recordings (5 sites) + 540 real optical BER points | simulator (`src/uwfc/linksim.py`): real acoustic gain dynamics + **assumed** link budget, optical attenuation/plumes, power, packets, rewards, battery, 1 s feedback delay |
+| What | forecasting of channel gain/delay spread with a compact network (PCT / PCT-E) vs 7 baselines; ablations; uncertainty; robustness; optical BER model | graph-temporal digital twin (PIGT-DT) vs baselines; controllers (heuristic, reactive, DT-planner, oracle, MAPPO, MAPPO+DT); ablations; scalability to 128 nodes; robustness |
+| Evidence about the real world? | yes (limited: 5 sites) | **no** – behaviour inside the simulator only |
 
-## Headline (measured, 5 held-out sites, 3 seeds)
-* Cross-site forecasting (Protocol A): PCT-E has the lowest mean error at +1 s (0.517 dB) and +2 s (0.582 dB) – **significantly better than all independent baselines at +2 s** (−0.036 dB vs Transformer, bootstrap CI excludes 0) and better than persistence at both horizons; at +1 s the gap to the best baseline (Transformer) is **inconclusive**.
-* On a chronological split (Protocol B) it is **not** better than gradient boosting.
-* Weaknesses: overconfident uncertainty on unseen sites; loses its edge with ≥ 1 s stale input; some components unjustified by ablation. See `docs/LIMITATIONS.md`.
-* Real-data scope: acoustic channel-impulse-response forecasting + optical BER surrogate. The original PIGT-DT hybrid-controller experiments need data that are not publicly available (see limitations) and were not run.
+**Read first:** `results/FINAL_REPORT.md` (all numbers, generated from CSVs) · `docs/LIMITATIONS.md` · `docs/SIMULATION_ASSUMPTIONS.md` · `results/plots/INDEX.md` (all 70 requested figures, each marked [MEASURED] or [SIMULATION]).
+
+## Headline results
+**Part I (measured, 5 held-out sites, 3 seeds).** PCT-E has the lowest cross-site error at +1 s (0.517 dB) and +2 s (0.582 dB) and is significantly better than every independent baseline at +2 s (paired block bootstrap); at +1 s it beats persistence but its gap to the best baseline is inconclusive; on a chronological split it is not better than gradient boosting. Its uncertainty is badly overconfident on unseen sites; it loses its edge when ≥ 1 s of input is stale.
+
+**Part II (simulation, test sites black/purple unseen in training).** Reward per node-step: Oracle 1.208 > MAPPO+DT 1.168 > PIGT-DT planner 1.140 > Reactive 1.118 > Heuristic 1.081 > MAPPO 1.070. PIGT-DT planner is better than Reactive/Heuristic/MAPPO (paired bootstrap CIs exclude 0) but its difference to MAPPO+DT is inconclusive and it closes only ≈24 % of the reactive→oracle gap. Digital-twin component ablations barely move controller reward (≤ 0.013). Out-of-distribution, MAPPO variants fail to generalise. A simulator bug (hybrid latency) was found and fixed during the study; all results were regenerated.
+
+## What is real and what is not
+Real: acoustic channel-gain fluctuations, optical data rate/BER tables. **Assumed (simulation only):** PDR, energy, latency, optical SNR, attenuation field, hybrid link, controller actions, multi-node scenarios. 35 of the 70 requested figures exist only as simulation figures; none of the simulated numbers should be quoted as real-system performance.
 
 ## Layout
 ```
-src/uwfc/        features, data/windowing, models (LSTM/GRU/TCN/Transformer/PCT), training, baselines, metrics
-scripts/         01 extract · 02 benchmark · 03 optical · 04 complexity · 06 selection · 07 final · 08 plots · 09 robustness · 10 scalability · 11 report
-results/         CSVs, FINAL_REPORT.md, plots/ (A_prediction … H_robustness + INDEX.md), artifacts/ (trained seed-0 weights + predictions)
-data/            processed features (raw data are re-downloadable: data/raw/fetch_uwa.sh, run_all.sh)
-docs/            METHODOLOGY, LITERATURE_AND_GAP, LIMITATIONS
-tests/           unit tests (leakage, normalisation, shapes)
+src/uwfc/   features, data, models, train, baselines, metrics (Part I) · linksim, dt, ctrl, simexp (Part II)
+scripts/    01 extract · 02 benchmark · 03 optical · 04 complexity · 06 selection · 07 final · 08 plots(measured) · 09 robustness · 10 scalability(real-data models)
+            11 report · 12 sim DT · 13 sim controllers · 14 sim ablation · 15 sim scale/robust · 16 sim plots + INDEX
+results/    CSVs, FINAL_REPORT.md, plots/ (A…H + INDEX.md), artifacts/ (Part I weights/predictions), sim/ (Part II results, DT/MAPPO weights)
+docs/       METHODOLOGY (Part I) · METHODOLOGY_SIM · SIMULATION_ASSUMPTIONS · LITERATURE_AND_GAP · LIMITATIONS
+tests/      leakage/normalisation/shape tests (Part I) and simulator/controller regression tests (Part II)
 ```
 ## Reproduce
-`bash run_all.sh` (≈ 3–4 h on 4 CPU cores; resumable). Tests: `PYTHONPATH=src pytest -q tests`.
+`bash run_all.sh` (≈ 8–10 h on 4 CPU cores, no GPU; resumable). Tests: `PYTHONPATH=src pytest -q tests`.
 
 ## Data & licences
-Underwater Acoustic Channel Repository (Zenodo 10.5281/zenodo.21287414, CC-BY-4.0); OFDM-UWVC dataset (Dratnal et al., Zenodo 10.5281/zenodo.17256508, CC-BY-4.0). Raw files are not redistributed here.
+Underwater Acoustic Channel Repository (Zenodo 10.5281/zenodo.21287414, CC-BY-4.0); OFDM-UWVC (Dratnal et al., Zenodo 10.5281/zenodo.17256508, CC-BY-4.0). Raw files are not redistributed.

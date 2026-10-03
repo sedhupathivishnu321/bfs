@@ -15,7 +15,7 @@ OURS = "#c4562d"; TAG = "[SIMULATION] "
 CC = {"PIGT-DT": OURS, "MAPPO": "#2f6f9f", "MAPPO+DT": "#3a9fa3", "Reactive": "#8a8f98", "Heuristic": "#d4a73a", "Oracle": "#222222", "AC-only": "#a67bb5", "OP-only": "#6a9f58", "HYB-low": "#7f6a4f"}
 simstatus = {}
 def save(fig, grp, num, slug, note=""):
-    f = OUT / DIRS[grp] / f"{num:02d}_sim_{slug}.png"; fig.savefig(f, dpi=150); plt.close(fig); simstatus.setdefault(num, []).append(("simulated" + (f" ({note})" if note else ""), str(f.relative_to(R / "results"))))
+    f = OUT / DIRS[grp] / f"{num:02d}_sim_{slug}.png"; fig.savefig(f, dpi=150, bbox_inches="tight"); plt.close(fig); simstatus.setdefault(num, []).append(("simulated" + (f" ({note})" if note else ""), str(f.relative_to(R / "results"))))
 def have(*fs): return all((SIM / f).exists() for f in fs)
 
 # ---------------------------------------------------------------- DT forecast figures (A, B, E)
@@ -122,10 +122,11 @@ def sweep(c):
     return out
 SW = {c: sweep(c) for c in cs}; ACT = {0: "AC low", 1: "AC high", 2: "OP low", 3: "OP high", 4: "HYB low", 5: "HYB high"}
 def sweep_fig(num, slug, key, ylab, logy=False, note="", acts=(0, 1, 2, 3, 4, 5)):
-    fig, ax = plt.subplots(1, 3, figsize=(11, 3.2), sharey=True)
-    for k, c in enumerate(cs):
+    only_ac = set(acts) <= {0, 1}; cs_ = cs[:1] if only_ac else cs
+    fig, ax = plt.subplots(1, len(cs_), figsize=(4.0 * len(cs_) + 1, 3.2), sharey=True, squeeze=False); ax = ax[0]
+    for k, c in enumerate(cs_):
         for a in acts: ax[k].plot(dgrid, np.maximum(SW[c][a][key], 1e-12) if logy else SW[c][a][key], label=ACT[a], ls="-" if a % 2 else "--", color=["#a67bb5", "#a67bb5", "#6a9f58", "#6a9f58", "#c4562d", "#c4562d"][a])
-        ax[k].set_xscale("log"); ax[k].set_xlabel("distance (m)"); ax[k].set_title(f"optical attenuation c={c} /m"); logy and ax[k].set_yscale("log")
+        ax[k].set_xscale("log"); ax[k].set_xlabel("distance (m)"); ax[k].set_title("acoustic modes (independent of optical attenuation)" if only_ac else f"optical attenuation c={c} /m"); logy and ax[k].set_yscale("log")
     ax[0].set_ylabel(ylab); ax[0].legend(frameon=False, fontsize=6); fig.suptitle(TAG + f"{ylab} vs distance (acoustic gain from real traces; optical c fixed per panel)", y=1.03, fontsize=9); save(fig, "C", num, slug, note)
 sweep_fig(18, "acoustic_pdr_vs_distance", "pdr", "PDR (acoustic modes)", acts=(0, 1)); sweep_fig(19, "optical_pdr_vs_distance", "pdr", "PDR (optical modes)", acts=(2, 3)); sweep_fig(20, "hybrid_pdr_vs_distance", "pdr", "PDR (hybrid modes)", acts=(4, 5))
 sweep_fig(23, "throughput_vs_distance", "goodput", "goodput (kbit/s)", logy=True); sweep_fig(24, "energy_vs_distance", "energy", "energy per step (J)"); sweep_fig(25, "latency_vs_distance", "latency", "latency (s)", logy=True)
@@ -135,8 +136,8 @@ ax[1].semilogy(snr + 5, S.ber_qam64(snr + 5), color="#2f6f9f"); ax[1].set_xlabel
 fig, ax = plt.subplots(figsize=(4.6, 3.2)); ax.semilogy(snr + 5, S.ber_qam64(snr + 5), color="#2f6f9f"); ms = np.clip(so_.ravel(), -5, 45)[::40]; ax.scatter(ms, S.ber_qam64(ms), s=3, color="k", alpha=.3); ax.set_xlabel("optical electrical SNR (dB)"); ax.set_ylabel("BER"); ax.set_ylim(1e-9, .5); ax.set_title(TAG + "Optical BER vs SNR (64-QAM; compare measured lab BER in plots/C_link_optical)", fontsize=8); save(fig, "C", 22, "optical_ber_vs_snr")
 
 # ---------------------------------------------------------------- controllers (C26, D, E44-46)
-cb = SIM / "controllers_baselines.csv"
-mp = [pd.read_csv(f) for f in sorted(glob.glob(str(SIM / "controllers_mappo*_s*.csv")))]
+cb = SIM / "controllers_eval_all.csv"
+mp = []
 if cb.exists():
     CT = pd.concat([pd.read_csv(cb)] + mp, ignore_index=True)
     def bar(num, base, slug, metrics=("reward", "goodput", "pdr", "energy", "viol"), ts="test_id"):
@@ -148,7 +149,7 @@ if cb.exists():
     bar(44, "MAPPO", "pigtdt_vs_mappo"); bar(45, "Heuristic", "pigtdt_vs_heuristic"); bar(46, "Oracle", "pigtdt_vs_oracle")
     fig, ax = plt.subplots(figsize=(8, 3.4)); tg_ = CT[CT.testset == "test_id"].groupby("controller")[["reward"]].mean(); order = [c for c in ["AC-only", "OP-only", "HYB-low", "Heuristic", "Reactive", "MAPPO", "MAPPO+DT", "PIGT-DT", "PIGT-DT (uncertainty MC)", "PIGT-DT (risk-averse)", "Oracle"] if c in tg_.index]
     gg = CT[CT.testset == "test_id"].groupby("controller")["reward"].agg(["mean", "std"]).loc[order]; ax.bar(range(len(order)), gg["mean"], yerr=gg["std"].fillna(0), color=[CC.get(o, "#bbbbbb") for o in order], capsize=2); ax.set_xticks(range(len(order))); ax.set_xticklabels(order, rotation=25, ha="right"); ax.set_ylabel("mean reward per node-step"); ax.set_title(TAG + "All controllers (test_id)")
-    fig.savefig(OUT / DIRS["E"] / "00_sim_all_controllers.png", dpi=150); plt.close(fig)
+    fig.savefig(OUT / DIRS["E"] / "00_sim_all_controllers.png", dpi=150, bbox_inches="tight"); plt.close(fig)
     # C26 mode selection probability vs distance
     ep = C.Episode(X.gen(3000, X.TEST_SITES, 64), 64, P, None); bins = np.exp(np.linspace(np.log(3), np.log(2500), 9)); fig, ax = plt.subplots(1, 3, figsize=(11, 3.1), sharey=True)
     for k, (nm, pol) in enumerate((("Reactive", C.Greedy("obs")), ("Oracle", C.Greedy("oracle")), ("Heuristic", C.Heuristic()))):
@@ -168,9 +169,9 @@ if hist["mappo"] and cb.exists():
             if not hist[fam]: continue
             Hh = pd.concat([h.assign(s=i) for i, h in enumerate(hist[fam])]); g = Hh.groupby("episodes")[key].agg(["mean", "std"]); sm = g.rolling(10, min_periods=1).mean(); ax.plot(sm.index, sm["mean"], color=CC[nm], label=nm); ax.fill_between(sm.index, sm["mean"] - sm["std"].fillna(0), sm["mean"] + sm["std"].fillna(0), color=CC[nm], alpha=.15)
         for n, ls in (("Reactive", ":"), ("Heuristic", "-."), ("Oracle", "--")): ax.axhline(refs[n][key], color=CC[n], ls=ls, lw=1, label=n)
-        ax.set_xlabel("training episodes (16 envs × 8 nodes each)"); ax.set_ylabel(yl); ax.legend(frameon=False, fontsize=6); ax.set_title(TAG + yl + " vs training episode (train-site episodes, sampling policy)", fontsize=8); save(fig, "D", num, slug)
+        ax.set_xlabel("training episodes (16 envs × 8 nodes each)"); ax.set_ylabel(yl); ax.legend(frameon=False, fontsize=6); ax.set_title(TAG + yl + " vs training episode", fontsize=8); save(fig, "D", num, slug)
     ser = {}
-    for f in [SIM / "series_baselines.npz"] + [Path(x) for x in sorted(glob.glob(str(SIM / "series_mappo*_s0.npz")))]:
+    for f in [SIM / "series_eval_all.npz"]:
         if f.exists():
             z = np.load(f)
             for k in z.files: lab, m = k.split("__"); ser.setdefault(lab, {})[m] = z[k]
@@ -180,8 +181,8 @@ if hist["mappo"] and cb.exists():
         for c in show: v = ser[c][key]; ax.plot(np.arange(len(v)) * S.STEP_S, np.cumsum(v) * (S.STEP_S if key == "goodput" else 1.0), label=c, color=CC.get(c, "grey"), lw=2 if c == "PIGT-DT" else 1.1)
         ax.set_xlabel("time (s)"); ax.set_ylabel(yl); ax.legend(frameon=False, fontsize=6); ax.set_title(TAG + yl, fontsize=8); save(fig, "D", num, slug)
     fig, ax = plt.subplots(len(show), 1, figsize=(7.5, 1.3 * len(show) + .5), sharex=True)
-    for a_, c in zip(np.atleast_1d(ax), show): a_.plot(np.arange(len(ser[c]["act0"])) * S.STEP_S, ser[c]["act0"] // 2, drawstyle="steps-post", color=CC.get(c, "grey")); a_.set_yticks([0, 1, 2]); a_.set_yticklabels(["AC", "OP", "HYB"], fontsize=6); a_.set_ylabel(c, fontsize=7)
-    np.atleast_1d(ax)[-1].set_xlabel("time (s)"); fig.suptitle(TAG + "Communication-mode switching over time (one node, one episode)", y=1.0, fontsize=9); save(fig, "D", 36, "mode_switching_over_time")
+    for a_, c in zip(np.atleast_1d(ax), show): a_.plot(np.arange(len(ser[c]["act0"])) * S.STEP_S, ser[c]["act0"], drawstyle="steps-post", color=CC.get(c, "grey")); a_.set_yticks(range(6)); a_.set_yticklabels(["AC-L", "AC-H", "OP-L", "OP-H", "HYB-L", "HYB-H"], fontsize=5); a_.set_ylabel(c, fontsize=7)
+    np.atleast_1d(ax)[-1].set_xlabel("time (s)"); fig.suptitle(TAG + "Mode/power switching over time (the node whose mode changes most under the oracle; one test episode)", y=1.0, fontsize=9); save(fig, "D", 36, "mode_switching_over_time")
 
 # ---------------------------------------------------------------- ablations (F)
 ab = SIM / "ablation_controllers.csv"; dma, dmr = SIM / "dt_metrics_ablate.csv", SIM / "dt_metrics_ratio.csv"

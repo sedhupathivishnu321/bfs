@@ -11,3 +11,15 @@
 /home/user/bfs/uw_project/src/uwfc/simexp.py:51: RuntimeWarning: Mean of empty slice
   out["MAE_thr_op_kbps"] = float(np.abs(dp["thr_op"][m0] - dtru["thr_op"][m0]).mean()); out["MAE_thr_ac_kbps"] = float(np.abs(dp["thr_ac"] - dtru["thr_ac"]).mean())
 [  170s] - no physics prior seed 0
+[  335s] - no physics prior seed 1
+[  496s] - no physics prior seed 2
+[  658s] - no graph seed 0
+[  818s] - no graph seed 1
+[  984s] - no graph seed 2
+[  993s] - no temporal seed 0
+[ 1002s] - no temporal seed 1
+[ 1010s] - no temporal seed 2
+[ 1371s] - no uncertainty seed 0
+[ 1758s] - no uncertainty seed 1
+[ 2468s] - no uncertainty seed 2
+[ 2468s] done

@@ -1,0 +1,34 @@
+[   19s] sensor_dropout 0.0
+[   38s] sensor_dropout 0.1
+[   57s] sensor_dropout 0.3
+[   74s] sensor_dropout 0.5
+[   94s] noisy_observations 0.0
+[  113s] noisy_observations 1.0
+[  132s] noisy_observations 2.0
+[  152s] noisy_observations 4.0
+[  172s] stale_dt 0.25
+[  192s] stale_dt 1.0
+[  211s] stale_dt 2.0
+[  228s] stale_dt 3.0
+[  245s] stale_dt 4.0
+[  265s] channel_model_mismatch nominal
+[  281s] channel_model_mismatch SL -3 dB
+[  300s] channel_model_mismatch SL +3 dB
+[  321s] channel_model_mismatch absorption x1.5
+[  341s] channel_model_mismatch optical c x1.5
+[  362s] channel_model_mismatch optical c x0.7
+[  382s] environment_mismatch nominal
+[  403s] environment_mismatch noise +6 dB
+[  423s] environment_mismatch noise -6 dB
+[  442s] unseen_distances seen (4-22 m / 150-1800 m)
+[  463s] unseen_distances unseen near 22-45 m
+[  482s] unseen_distances unseen far 2200-3500 m
+[  502s] unseen_turbidity seen turbidity (c 0.15-0.41)
+[  522s] unseen_turbidity unseen clearer (c 0.08-0.15)
+[  542s] unseen_turbidity unseen turbid (c 0.55-1.1)
+[  561s] unseen_acoustic_site black
+[  580s] unseen_acoustic_site purple
+[  600s] unseen_acoustic_site yellow
+[  620s] unseen_acoustic_site blue
+[  640s] unseen_acoustic_site red
+done

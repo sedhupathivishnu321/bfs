@@ -163,7 +163,7 @@ def link_metrics(s_ac_low, s_op_low, action, prev_action=None, p=Params(), dist=
     ber_eff = np.where(mode == 0, ber_a, np.where(mode == 1, ber_o, np.minimum(ber_a, ber_o)))
     energy = STEP_S * (use_a * np.where(pw == 1, p.p_ac[1], p.p_ac[0]) + use_o * np.where(pw == 1, p.p_op[1], p.p_op[0]))
     lat_a = (dist / p.c_sound if dist is not None else 0) + p.pkt_bits / (p.r_ac_kbps * 1e3); lat_o = (dist / p.c_light if dist is not None else 0) + p.pkt_bits / (p.r_op_kbps * 1e3)
-    latency = np.where(mode == 0, lat_a, np.where(mode == 1, lat_o, np.minimum(lat_a, lat_o)))
+    latency = np.where(mode == 0, lat_a, np.where(mode == 1, lat_o, po * lat_o + (1 - po) * lat_a))   # HYB: optical copy arrives first only if it succeeds, else the acoustic copy (BUGFIX: was min(lat_a, lat_o))
     viol = (pdr_eff < p.pdr_min).astype(np.float32)
     sw = 0.0 if prev_action is None else (action != prev_action).astype(np.float32)
     reward = p.w_thr * np.log2(1 + goodput) - p.lam_e * energy - p.lam_l * latency - p.kappa * viol - p.switch_cost * sw

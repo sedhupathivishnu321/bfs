@@ -1,0 +1,14 @@
+[    0s] it 0 reward -0.933 pdr 0.418 E 1.110 viol 0.592
+[   52s] it 20 reward 0.387 pdr 0.849 E 0.901 viol 0.183
+[  103s] it 40 reward 1.434 pdr 0.920 E 0.831 viol 0.094
+[  154s] it 60 reward 1.417 pdr 0.912 E 0.805 viol 0.098
+[  205s] it 80 reward 1.195 pdr 0.895 E 0.778 viol 0.127
+[  256s] it 100 reward 0.932 pdr 0.877 E 0.756 viol 0.137
+[  307s] it 120 reward 1.360 pdr 0.903 E 0.773 viol 0.112
+[  358s] it 140 reward 1.393 pdr 0.897 E 0.786 viol 0.115
+[  410s] it 160 reward 1.684 pdr 0.940 E 0.747 viol 0.066
+[  462s] it 180 reward 1.184 pdr 0.904 E 0.733 viol 0.106
+[  514s] it 200 reward 1.026 pdr 0.885 E 0.752 viol 0.128
+[  567s] it 220 reward 0.585 pdr 0.872 E 0.719 viol 0.144
+[  620s] it 240 reward 1.378 pdr 0.876 E 0.804 viol 0.136
+done

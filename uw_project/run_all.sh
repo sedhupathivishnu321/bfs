@@ -22,5 +22,14 @@ python scripts/09_robustness.py
 python scripts/04_complexity.py
 python scripts/10_scalability.py
 python scripts/08_make_plots.py
+# ---- Part II (simulation) ----
+python scripts/12_sim_dt.py --part main & python scripts/12_sim_dt.py --part ablate; wait; python scripts/12_sim_dt.py --part ratio
+python scripts/13_sim_controllers.py --mode baselines
+for s in 0 1 2; do python scripts/13_sim_controllers.py --mode mappo --seed $s; python scripts/13_sim_controllers.py --mode mappo_dt --seed $s; done
+python scripts/13_sim_controllers.py --mode eval_all
+python scripts/14_sim_ablation.py
+python scripts/15_sim_scale_robust.py --part robust
+python scripts/15_sim_scale_robust.py --part scale      # run on an otherwise idle machine (timing)
+python scripts/08_make_plots.py && python scripts/16_sim_plots.py
 python scripts/11_report.py
 pytest -q tests

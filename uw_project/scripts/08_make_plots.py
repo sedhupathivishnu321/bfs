@@ -18,7 +18,7 @@ PAL = {"PCT-E (ours)": OURS, "PCT-v2 (single)": "#e59a7c", "GBM": "#2f6f9f", "LS
 NOM_RANGE_KM = dict(black=8.72, blue=5.0, purple=0.2, red=0.25, yellow=7.0)   # from recording descriptions (midpoint / representative)
 status = {}
 def save(fig, grp, num, slug, note=""):
-    f = OUT / DIRS[grp] / f"{num:02d}_{slug}.png"; fig.savefig(f, dpi=150); plt.close(fig); status[num] = ("produced" + (f" (adapted: {note})" if note else ""), str(f.relative_to(R / 'results')))
+    f = OUT / DIRS[grp] / f"{num:02d}_{slug}.png"; fig.savefig(f, dpi=150, bbox_inches="tight"); plt.close(fig); status[num] = ("produced" + (f" (adapted: {note})" if note else ""), str(f.relative_to(R / 'results')))
 
 # ---------- load artifacts ----------
 folds, A = [], {}

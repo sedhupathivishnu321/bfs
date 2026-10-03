@@ -1,11 +1,12 @@
 """Scalability (N nodes) and robustness of all controllers on the SIMULATED link. Needs: DT members, MAPPO and MAPPO+DT seed-0 policies."""
-import sys, time, dataclasses
+import sys, time, dataclasses, argparse
 from pathlib import Path
 import numpy as np, pandas as pd, torch
 R = Path(__file__).resolve().parents[1]; sys.path.insert(0, str(R / "src"))
 from uwfc import ctrl as C, simexp as X, dt as DT, linksim as S
 from torch.profiler import profile, ProfilerActivity
-torch.set_num_threads(3); p = X.P
+ap = argparse.ArgumentParser(); ap.add_argument('--part', default='robust'); a = ap.parse_args()
+torch.set_num_threads(3 if a.part == 'robust' else 4); p = X.P
 for f in [X.MODELS / "mappo_s0.pt", X.MODELS / "mappo_dt_s0.pt"] + [X.model_path("PIGT-DT", s) for s in range(3)]:
     while not f.exists(): time.sleep(20)
 members = X.load_ensemble(3); fin0 = 11; 
@@ -25,18 +26,19 @@ def scen(kind, level, seed=7000, B=48, N=8, regime=None, mismatch=None, lag=None
         rows.append(dict(kind=kind, level=level, controller=nm, N=N) | s)
     print(f"[{time.time()-t0:5.0f}s] {kind} {level}", flush=True)
 # ---------------- robustness
-for dr in (0.0, 0.1, 0.3, 0.5): scen("sensor_dropout", dr, drop=dr)
-for ex in (0.0, 1.0, 2.0, 4.0): scen("noisy_observations", ex, extra_noise=ex)
-for dl in (1, 4, 8, 12, 16): scen("stale_dt", dl * S.STEP_S, lag=dl - 1)
-for nm, mm in {"nominal": {}, "SL -3 dB": dict(sl_db=-3.0), "SL +3 dB": dict(sl_db=3.0), "absorption x1.5": dict(abs_scale=1.5), "optical c x1.5": dict(c_scale=1.5), "optical c x0.7": dict(c_scale=0.7)}.items(): scen("channel_model_mismatch", nm, mismatch=mm)
-for nm, rg in {"nominal": S.Regime(), "noise +6 dB": S.Regime(noise_shift_db=6.0), "noise -6 dB": S.Regime(noise_shift_db=-6.0)}.items(): scen("environment_mismatch", nm, regime=rg)
-for nm, rg in {"seen (4-22 m / 150-1800 m)": S.Regime(), "unseen near 22-45 m": S.Regime(near_range=(22.0, 45.0)), "unseen far 2200-3500 m": S.Regime(far_range=(2200.0, 3500.0))}.items(): scen("unseen_distances", nm, regime=rg)
-for nm, rg in {"seen turbidity (c 0.15-0.41)": S.Regime(), "unseen clearer (c 0.08-0.15)": S.Regime(log_c_mu=(-2.5, -1.9)), "unseen turbid (c 0.55-1.1)": S.Regime(log_c_mu=(-0.6, 0.1))}.items(): scen("unseen_turbidity", nm, regime=rg)
-for st in ("black", "purple", "yellow", "blue", "red"): scen("unseen_acoustic_site", st, sites=[st], seed=7100)     # blue/red were in DT+MAPPO training (seen); black/purple/yellow unseen
-pd.DataFrame(rows).to_csv(X.SIM / "robustness_controllers.csv", index=False)
-# ---------------- scalability
+if a.part == 'robust':
+  for dr in (0.0, 0.1, 0.3, 0.5): scen("sensor_dropout", dr, drop=dr)
+  for ex in (0.0, 1.0, 2.0, 4.0): scen("noisy_observations", ex, extra_noise=ex)
+  for dl in (1, 4, 8, 12, 16): scen("stale_dt", dl * S.STEP_S, lag=dl - 1)
+  for nm, mm in {"nominal": {}, "SL -3 dB": dict(sl_db=-3.0), "SL +3 dB": dict(sl_db=3.0), "absorption x1.5": dict(abs_scale=1.5), "optical c x1.5": dict(c_scale=1.5), "optical c x0.7": dict(c_scale=0.7)}.items(): scen("channel_model_mismatch", nm, mismatch=mm)
+  for nm, rg in {"nominal": S.Regime(), "noise +6 dB": S.Regime(noise_shift_db=6.0), "noise -6 dB": S.Regime(noise_shift_db=-6.0)}.items(): scen("environment_mismatch", nm, regime=rg)
+  for nm, rg in {"seen (4-22 m / 150-1800 m)": S.Regime(), "unseen near 22-45 m": S.Regime(near_range=(22.0, 45.0)), "unseen far 2200-3500 m": S.Regime(far_range=(2200.0, 3500.0))}.items(): scen("unseen_distances", nm, regime=rg)
+  for nm, rg in {"seen turbidity (c 0.15-0.41)": S.Regime(), "unseen clearer (c 0.08-0.15)": S.Regime(log_c_mu=(-2.5, -1.9)), "unseen turbid (c 0.55-1.1)": S.Regime(log_c_mu=(-0.6, 0.1))}.items(): scen("unseen_turbidity", nm, regime=rg)
+  for st in ("black", "purple", "yellow", "blue", "red"): scen("unseen_acoustic_site", st, sites=[st], seed=7100)     # blue/red were in DT+MAPPO training (seen); black/purple/yellow unseen
+  pd.DataFrame(rows).to_csv(X.SIM / "robustness_controllers.csv", index=False)
+# ---------------- scalability (run alone on an idle CPU: it measures latency)
 sc_rows = []; net = members[0]
-for N in (4, 8, 16, 32, 64, 128):
+for N in (() if a.part == 'robust' else (4, 8, 16, 32, 64, 128)):
     d = X.gen(8000, X.TEST_SITES, 16, N=N); x, adj = torch.from_numpy(d["X"][:1]), torch.from_numpy(d["adj"][:1])
     with torch.no_grad():
         for _ in range(5): net(x, adj)
@@ -52,4 +54,5 @@ for N in (4, 8, 16, 32, 64, 128):
         ep = C.Episode(dd, 24, p, pred); s = C.summarize(C.rollout(ep, pol, p)); ctl[nm] = s
         sc_rows.append(dict(N=N, controller=nm, reward=s["reward"], pdr=s["pdr"], goodput_per_node=s["goodput"], goodput_total=s["goodput"] * N, energy_per_node=s["energy"], energy_total=s["energy"] * N, viol=s["viol"]))
     sc_rows.append(dict(N=N, controller="_DT", dt_infer_ms=lat, dt_infer_ms_per_node=lat / N, dt_ensemble3_ms=3 * lat, dt_mem_MB=mem, dt_train_s_per_epoch=tr_s, n_train_samples=len(d2["X"]))); print("scale", N, flush=True)
-pd.DataFrame(sc_rows).to_csv(X.SIM / "scalability_sim.csv", index=False); print("done")
+if sc_rows: pd.DataFrame(sc_rows).to_csv(X.SIM / "scalability_sim.csv", index=False)
+print("done")

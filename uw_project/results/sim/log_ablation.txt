@@ -1,0 +1,67 @@
+component      PIGT-DT (full)             0        reward 1.140 viol 0.177
+component      Reactive (no DT)           0        reward 1.118 viol 0.179
+component      Oracle                     0        reward 1.208 viol 0.162
+component      - no physics prior         0        reward 1.143 viol 0.176
+component      - no graph                 0        reward 1.145 viol 0.177
+component      - no temporal              0        reward 1.127 viol 0.178
+component      - no uncertainty           0        reward 1.142 viol 0.177
+component      + uncertainty MC (full DT) 0        reward 1.118 viol 0.182
+risk           with risk constraint       0        reward 1.140 viol 0.177
+risk           without risk constraint    0        reward 1.188 viol 0.253
+risk           risk-averse (+50% violation weight, uncertainty MC) 0        reward 1.058 viol 0.174
+ensemble       M=1                        1        reward 1.143 viol 0.176
+ensemble       M=2                        2        reward 1.143 viol 0.176
+ensemble       M=3                        3        reward 1.140 viol 0.177
+ensemble       M=5                        5        reward 1.141 viol 0.177
+real_sim_ratio 100% real traces           100      reward 1.143 viol 0.176
+real_sim_ratio 50% real traces            50       reward 1.147 viol 0.176
+real_sim_ratio 0% real traces             0        reward 1.145 viol 0.176
+mismatch       PIGT-DT                    nominal  reward 1.140 viol 0.177
+mismatch       Reactive                   nominal  reward 1.118 viol 0.179
+mismatch       Oracle                     nominal  reward 1.208 viol 0.162
+mismatch       PIGT-DT                    SL -3 dB reward 1.003 viol 0.237
+mismatch       Reactive                   SL -3 dB reward 0.975 viol 0.243
+mismatch       Oracle                     SL -3 dB reward 1.075 viol 0.222
+mismatch       PIGT-DT                    SL +3 dB reward 1.249 viol 0.131
+mismatch       Reactive                   SL +3 dB reward 1.218 viol 0.133
+mismatch       Oracle                     SL +3 dB reward 1.310 viol 0.115
+mismatch       PIGT-DT                    absorption x1.5 reward 1.113 viol 0.188
+mismatch       Reactive                   absorption x1.5 reward 1.088 viol 0.194
+mismatch       Oracle                     absorption x1.5 reward 1.182 viol 0.174
+mismatch       PIGT-DT                    noise +6 dB reward 0.813 viol 0.323
+mismatch       Reactive                   noise +6 dB reward 0.783 viol 0.327
+mismatch       Oracle                     noise +6 dB reward 0.887 viol 0.307
+mismatch       PIGT-DT                    optical c x1.5 reward 0.831 viol 0.158
+mismatch       Reactive                   optical c x1.5 reward 0.807 viol 0.160
+mismatch       Oracle                     optical c x1.5 reward 0.868 viol 0.147
+mismatch       PIGT-DT                    optical c x0.7 reward 1.563 viol 0.185
+mismatch       Reactive                   optical c x0.7 reward 1.534 viol 0.190
+mismatch       Oracle                     optical c x0.7 reward 1.636 viol 0.171
+staleness      PIGT-DT                    0.25     reward 1.158 viol 0.177
+staleness      Reactive                   0.25     reward 1.171 viol 0.171
+staleness      Oracle                     0.25     reward 1.209 viol 0.162
+staleness      PIGT-DT                    1.0      reward 1.140 viol 0.177
+staleness      Reactive                   1.0      reward 1.118 viol 0.179
+staleness      Oracle                     1.0      reward 1.208 viol 0.162
+staleness      PIGT-DT                    2.0      reward 1.083 viol 0.183
+staleness      Reactive                   2.0      reward 1.056 viol 0.185
+staleness      Oracle                     2.0      reward 1.201 viol 0.162
+staleness      PIGT-DT                    3.0      reward 1.031 viol 0.187
+staleness      Reactive                   3.0      reward 1.003 viol 0.190
+staleness      Oracle                     3.0      reward 1.194 viol 0.164
+staleness      PIGT-DT                    4.0      reward 0.984 viol 0.190
+staleness      Reactive                   4.0      reward 0.963 viol 0.193
+staleness      Oracle                     4.0      reward 1.188 viol 0.164
+node_failure   PIGT-DT (graph)            0.0      reward 1.140 viol 0.177
+node_failure   no graph                   0.0      reward 1.145 viol 0.177
+node_failure   Reactive                   0.0      reward 1.118 viol 0.179
+node_failure   PIGT-DT (graph)            0.125    reward 1.054 viol 0.183
+node_failure   no graph                   0.125    reward 1.060 viol 0.183
+node_failure   Reactive                   0.125    reward 1.032 viol 0.186
+node_failure   PIGT-DT (graph)            0.25     reward 1.107 viol 0.177
+node_failure   no graph                   0.25     reward 1.112 viol 0.177
+node_failure   Reactive                   0.25     reward 1.079 viol 0.181
+node_failure   PIGT-DT (graph)            0.5      reward 1.129 viol 0.187
+node_failure   no graph                   0.5      reward 1.138 viol 0.186
+node_failure   Reactive                   0.5      reward 1.104 viol 0.190
+done

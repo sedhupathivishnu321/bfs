@@ -1,0 +1,37 @@
+/home/user/bfs/uw_project/src/uwfc/simexp.py:46: RuntimeWarning: Mean of empty slice
+  x = e[..., j] if m is None else e[..., j][m]; out[f"MAE_{nm}"] = float(np.abs(x).mean()); out[f"RMSE_{nm}"] = float(np.sqrt((x ** 2).mean()))
+/usr/local/lib/python3.11/dist-packages/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in divide
+  ret = ret.dtype.type(ret / rcount)
+/home/user/bfs/uw_project/src/uwfc/simexp.py:49: RuntimeWarning: Mean of empty slice
+  out["MAE_pdr_ac"] = float(np.abs(dp["pdr_ac"] - dtru["pdr_ac"]).mean()); out["MAE_pdr_op"] = float(np.abs(dp["pdr_op"][m0] - dtru["pdr_op"][m0]).mean())
+/usr/local/lib/python3.11/dist-packages/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+/home/user/bfs/uw_project/src/uwfc/simexp.py:50: RuntimeWarning: Mean of empty slice
+  out["MAE_log10ber_ac"] = float(np.abs(np.log10(dp["ber_ac"] + 1e-9) - np.log10(dtru["ber_ac"] + 1e-9)).mean()); out["MAE_log10ber_op"] = float(np.abs(np.log10(dp["ber_op"][m0] + 1e-9) - np.log10(dtru["ber_op"][m0] + 1e-9)).mean())
+/home/user/bfs/uw_project/src/uwfc/simexp.py:51: RuntimeWarning: Mean of empty slice
+  out["MAE_thr_op_kbps"] = float(np.abs(dp["thr_op"][m0] - dtru["thr_op"][m0]).mean()); out["MAE_thr_ac_kbps"] = float(np.abs(dp["thr_ac"] - dtru["thr_ac"]).mean())
+[  169s] PIGT-DT seed 0
+[  333s] PIGT-DT seed 1
+[  499s] PIGT-DT seed 2
+[  661s] PIGT-DT seed 3
+[  821s] PIGT-DT seed 4
+[  882s] Physics-only
+[ 1234s] Data-only seed 0
+[ 1625s] Data-only seed 1
+[ 2335s] Data-only seed 2
+[ 3121s] LSTM seed 0
+[ 3546s] LSTM seed 1
+[ 3704s] LSTM seed 2
+[ 3851s] GRU seed 0
+[ 3988s] GRU seed 1
+[ 4104s] GRU seed 2
+[ 4182s] TCN seed 0
+[ 4258s] TCN seed 1
+[ 4334s] TCN seed 2
+[ 4582s] Transformer seed 0
+[ 4846s] Transformer seed 1
+[ 5110s] Transformer seed 2
+[ 5113s] GNN seed 0
+[ 5116s] GNN seed 1
+[ 5119s] GNN seed 2
+[ 5119s] done
