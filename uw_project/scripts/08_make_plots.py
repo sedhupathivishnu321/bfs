@@ -140,13 +140,13 @@ if folds:
     # ---- A9/A10 MAE / RMSE across models; E39-42 ----
     mA, fA = R / "results/protocolA_main.csv", R / "results/protocolA_final.csv"
     if mA.exists() and fA.exists():
-        dm = pd.concat([pd.read_csv(mA), pd.read_csv(fA)]); dm["model"] = dm.model.replace({"PCT (proposed)": "PCT (single, base)", "PCT-E (ensemble x3)": "PCT-E (ours)"})
+        dm = pd.concat([pd.read_csv(f) for f in sorted(R.glob("results/protocolA_main*.csv"))] + [pd.read_csv(fA)]); dm["model"] = dm.model.replace({"PCT (proposed)": "PCT (single, base)", "PCT-E (ensemble x3)": "PCT-E (ours)"})
         fm = dm.groupby(["model", "fold"]).mean(numeric_only=True).reset_index()
         for num, kind in ((9, "MAE"), (10, "RMSE")):
             cols = [f"{kind}_gain_0.5s", f"{kind}_gain_1.0s", f"{kind}_gain_2.0s"]; g = fm.groupby("model")[cols].agg(["mean", "std"]); order = g[(cols[1], "mean")].sort_values().index
             fig, ax = plt.subplots(figsize=(9, 3.8)); w = .27
             for k, c in enumerate(cols): ax.bar(np.arange(len(order)) + (k - 1) * w, g.loc[order, (c, "mean")], w, yerr=g.loc[order, (c, "std")], capsize=2, label=c.split("_")[-1], color=["#9db7d1", "#5d89b4", "#2b5a8a"][k])
-            ax.set_xticks(range(len(order))); ax.set_xticklabels(order, rotation=30, ha="right"); ax.set_ylabel(f"{kind} of gain change (dB); mean ± std over 5 held-out sites"); ax.legend(title="horizon", frameon=False); ax.set_title(f"{kind} comparison across models (Protocol A, leave-one-site-out)")
+            ax.set_xticks(range(len(order))); ax.set_xticklabels(order, rotation=30, ha="right"); ax.set_ylabel(f"{kind} (dB), mean ± std over sites"); ax.legend(title="horizon", frameon=False); ax.set_title(f"{kind} comparison across models (Protocol A, leave-one-site-out)")
             save(fig, "A", num, f"{kind.lower()}_comparison_across_models")
         for num, base in ((39, "LSTM"), (40, "GRU"), (41, "TCN"), (42, "Transformer")):
             fig, ax = plt.subplots(1, 2, figsize=(8.5, 3.3))
@@ -186,7 +186,7 @@ if rb.exists():
         ax.set_xlabel(xl[kind]); ax.set_ylabel("MAE +1 s gain (dB), mean over folds"); ax.legend(frameon=False, fontsize=6); ax.set_title(f"Robustness: {slug.replace('_',' ')}"); save(fig, "H", num, slug, "'stale DT' = stale observations" if kind == "stale" else "")
 mA = R / "results/protocolA_final.csv"
 if mA.exists() and (R / "results/protocolA_main.csv").exists():
-    dm = pd.concat([pd.read_csv(R / "results/protocolA_main.csv"), pd.read_csv(mA)]); fm = dm.groupby(["model", "fold"])["MAE_gain_1.0s"].mean().unstack(0)
+    dm = pd.concat([pd.read_csv(f) for f in sorted(R.glob("results/protocolA_main*.csv"))] + [pd.read_csv(mA)]); fm = dm.groupby(["model", "fold"])["MAE_gain_1.0s"].mean().unstack(0)
     if "PCT-E (ensemble x3)" in fm:
         fig, ax = plt.subplots(figsize=(5.4, 3.3)); rel = 100 * (fm["Persistence"] - fm["PCT-E (ensemble x3)"]) / fm["Persistence"]
         ax.bar(rel.index, rel.values, color=[OURS if v > 0 else GREY for v in rel.values]); ax.axhline(0, color="k", lw=.8); ax.set_ylabel("MAE reduction vs persistence (%)"); ax.set_xlabel("held-out (unseen) site")
@@ -217,7 +217,7 @@ if opp.exists():
 sc = R / "results/scalability.csv"
 if sc.exists():
     d = pd.read_csv(sc)
-    for num, col, yl, slug in ((57, "infer_ms_total", "inference latency, all nodes (ms, CPU)", "inference_latency_vs_nodes"), (58, "py_peak_MB", "peak Python-tracked memory (MB, CPU)", "memory_vs_nodes"), (59, "train_s_per_epoch", "training time per epoch (s, CPU)", "training_time_vs_nodes")):
+    for num, col, yl, slug in ((57, "infer_ms_total", "inference latency, all nodes (ms, CPU)", "inference_latency_vs_nodes"), (58, "act_alloc_MB", "tensor memory allocated per forward pass (MB, CPU)", "memory_vs_nodes"), (59, "train_s_per_epoch", "training time per epoch (s, CPU)", "training_time_vs_nodes")):
         fig, ax = plt.subplots(figsize=(5.2, 3.4))
         for m, g in d.groupby("model"): ax.plot(g.nodes, g[col], "o-", label=m, lw=1.6 if m == "PCT" else 1, color=OURS if m == "PCT" else None)
         ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlabel("number of nodes N (one forecast per node)"); ax.set_ylabel(yl); ax.legend(frameon=False, fontsize=7); ax.set_title("Compute scaling (timing only; random inputs)"); save(fig, "G", num, slug, "CPU only, no GPU; per-node forecasters")

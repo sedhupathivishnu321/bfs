@@ -1,0 +1,22 @@
+recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
+[     1s] red     s1 Persistence                  MAEg1s=0.9842 MAEd1s=0.5545
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 6.164727750501697e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[     2s] red     s1 AR(ridge)                    MAEg1s=0.9105 MAEd1s=0.4909
+[    15s] red     s1 GBM                          MAEg1s=0.8566 MAEd1s=0.4612
+[    38s] red     s1 LSTM                         MAEg1s=0.9815 MAEd1s=0.5524
+[    58s] red     s1 GRU                          MAEg1s=0.9845 MAEd1s=0.5479
+[    81s] red     s1 TCN                          MAEg1s=0.9823 MAEd1s=0.5329
+[   178s] red     s1 Transformer                  MAEg1s=0.9374 MAEd1s=0.5488
+[   217s] red     s1 PCT (proposed)               MAEg1s=0.9079 MAEd1s=0.5407
+[   217s] red     s2 Persistence                  MAEg1s=0.9842 MAEd1s=0.5545
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 6.164727750501697e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[   218s] red     s2 AR(ridge)                    MAEg1s=0.9105 MAEd1s=0.4909
+[   231s] red     s2 GBM                          MAEg1s=0.8492 MAEd1s=0.4565
+[   251s] red     s2 LSTM                         MAEg1s=0.9841 MAEd1s=0.5530
+[   271s] red     s2 GRU                          MAEg1s=0.9784 MAEd1s=0.5448
+[   297s] red     s2 TCN                          MAEg1s=0.9440 MAEd1s=0.5358
+[   470s] red     s2 Transformer                  MAEg1s=0.8603 MAEd1s=0.4701
+[   514s] red     s2 PCT (proposed)               MAEg1s=0.8750 MAEd1s=0.4816
+done 514.0368936061859

@@ -44,3 +44,73 @@
 [ 1162s] blue    s2 PCT-v2 (single) + shrink   MAEg1s=0.6684 g2s=0.8823 d1s=0.1256
 [ 1162s] blue    s2 PCT-E (ensemble x3) + shrink MAEg1s=0.6644 g2s=0.8896 d1s=0.1246
 [ 1162s] blue    s2 GBM + shrink               MAEg1s=0.6435 g2s=0.8970 d1s=0.1202
+[ 1492s] purple  s0 PCT-v2 (single)            MAEg1s=0.7351 g2s=0.7341 d1s=0.3993
+[ 1492s] purple  s0 PCT-E (ensemble x3)        MAEg1s=0.7144 g2s=0.7358 d1s=0.3949
+[ 1492s] purple  s0 GBM                        MAEg1s=0.7333 g2s=1.3476 d1s=0.6148
+[ 1492s] purple  s0 LSTM                       MAEg1s=0.7411 g2s=0.8028 d1s=0.4210
+[ 1492s] purple  s0 GRU                        MAEg1s=0.7564 g2s=0.7975 d1s=0.4092
+[ 1492s] purple  s0 TCN                        MAEg1s=0.7313 g2s=0.7695 d1s=0.4321
+[ 1492s] purple  s0 Transformer                MAEg1s=0.6952 g2s=0.7310 d1s=0.4256
+[ 1492s] purple  s0 Persistence                MAEg1s=0.7444 g2s=0.8169 d1s=0.4194
+[ 1492s] purple  s0 PCT-v2 (single) + shrink   MAEg1s=0.7333 g2s=0.7516 d1s=0.4052
+[ 1492s] purple  s0 PCT-E (ensemble x3) + shrink MAEg1s=0.7330 g2s=0.7553 d1s=0.3926
+[ 1492s] purple  s0 GBM + shrink               MAEg1s=0.7248 g2s=0.8248 d1s=0.4229
+[ 1649s] purple  s1 PCT-v2 (single)            MAEg1s=0.7248 g2s=0.7372 d1s=0.4007
+[ 1649s] purple  s1 PCT-E (ensemble x3)        MAEg1s=0.7152 g2s=0.7356 d1s=0.3923
+[ 1649s] purple  s1 GBM                        MAEg1s=0.7333 g2s=1.3476 d1s=0.6148
+[ 1649s] purple  s1 PCT-v2 (single) + shrink   MAEg1s=0.7426 g2s=0.7552 d1s=0.4011
+[ 1649s] purple  s1 PCT-E (ensemble x3) + shrink MAEg1s=0.7349 g2s=0.7565 d1s=0.3871
+[ 1649s] purple  s1 GBM + shrink               MAEg1s=0.7248 g2s=0.8248 d1s=0.4229
+[ 1802s] purple  s2 PCT-v2 (single)            MAEg1s=0.7124 g2s=0.7310 d1s=0.4098
+[ 1802s] purple  s2 PCT-E (ensemble x3)        MAEg1s=0.7157 g2s=0.7345 d1s=0.3934
+[ 1802s] purple  s2 GBM                        MAEg1s=0.7333 g2s=1.3476 d1s=0.6148
+[ 1802s] purple  s2 PCT-v2 (single) + shrink   MAEg1s=0.7314 g2s=0.7474 d1s=0.4104
+[ 1802s] purple  s2 PCT-E (ensemble x3) + shrink MAEg1s=0.7360 g2s=0.7512 d1s=0.3895
+[ 1802s] purple  s2 GBM + shrink               MAEg1s=0.7248 g2s=0.8248 d1s=0.4229
+[ 2153s] red     s0 PCT-v2 (single)            MAEg1s=0.9136 g2s=0.9671 d1s=0.5046
+[ 2153s] red     s0 PCT-E (ensemble x3)        MAEg1s=0.8851 g2s=0.9120 d1s=0.4992
+[ 2153s] red     s0 GBM                        MAEg1s=0.8561 g2s=0.9071 d1s=0.4618
+[ 2153s] red     s0 LSTM                       MAEg1s=0.9829 g2s=1.0769 d1s=0.5529
+[ 2153s] red     s0 GRU                        MAEg1s=0.9815 g2s=1.0838 d1s=0.5541
+[ 2153s] red     s0 TCN                        MAEg1s=0.9444 g2s=1.0150 d1s=0.5196
+[ 2153s] red     s0 Transformer                MAEg1s=0.9341 g2s=1.0026 d1s=0.5293
+[ 2153s] red     s0 Persistence                MAEg1s=0.9842 g2s=1.0874 d1s=0.5545
+[ 2153s] red     s0 PCT-v2 (single) + shrink   MAEg1s=0.9160 g2s=0.9724 d1s=0.5101
+[ 2153s] red     s0 PCT-E (ensemble x3) + shrink MAEg1s=0.9105 g2s=0.9334 d1s=0.4808
+[ 2153s] red     s0 GBM + shrink               MAEg1s=0.9637 g2s=1.0597 d1s=0.4701
+[ 2263s] red     s1 PCT-v2 (single)            MAEg1s=0.9055 g2s=0.9715 d1s=0.5217
+[ 2263s] red     s1 PCT-E (ensemble x3)        MAEg1s=0.8815 g2s=0.9155 d1s=0.5093
+[ 2263s] red     s1 GBM                        MAEg1s=0.8566 g2s=0.9041 d1s=0.4612
+[ 2263s] red     s1 PCT-v2 (single) + shrink   MAEg1s=0.9163 g2s=0.9564 d1s=0.5244
+[ 2263s] red     s1 PCT-E (ensemble x3) + shrink MAEg1s=0.8902 g2s=0.9368 d1s=0.4940
+[ 2263s] red     s1 GBM + shrink               MAEg1s=0.9731 g2s=1.0581 d1s=0.4620
+[ 2355s] red     s2 PCT-v2 (single)            MAEg1s=0.8979 g2s=0.9624 d1s=0.5075
+[ 2355s] red     s2 PCT-E (ensemble x3)        MAEg1s=0.8796 g2s=0.9114 d1s=0.5070
+[ 2355s] red     s2 GBM                        MAEg1s=0.8492 g2s=0.9133 d1s=0.4565
+[ 2355s] red     s2 PCT-v2 (single) + shrink   MAEg1s=0.8684 g2s=1.0020 d1s=0.4904
+[ 2355s] red     s2 PCT-E (ensemble x3) + shrink MAEg1s=0.8754 g2s=0.9329 d1s=0.4889
+[ 2355s] red     s2 GBM + shrink               MAEg1s=0.9618 g2s=1.0588 d1s=0.4574
+[ 2577s] yellow  s0 PCT-v2 (single)            MAEg1s=0.2429 g2s=0.2844 d1s=0.0988
+[ 2577s] yellow  s0 PCT-E (ensemble x3)        MAEg1s=0.2408 g2s=0.2867 d1s=0.0979
+[ 2577s] yellow  s0 GBM                        MAEg1s=0.4425 g2s=0.7074 d1s=0.0973
+[ 2577s] yellow  s0 LSTM                       MAEg1s=0.2479 g2s=0.2966 d1s=0.1061
+[ 2577s] yellow  s0 GRU                        MAEg1s=0.2464 g2s=0.2934 d1s=0.1053
+[ 2577s] yellow  s0 TCN                        MAEg1s=0.2492 g2s=0.3072 d1s=0.1030
+[ 2577s] yellow  s0 Transformer                MAEg1s=0.2409 g2s=0.3082 d1s=0.1107
+[ 2577s] yellow  s0 Persistence                MAEg1s=0.2467 g2s=0.2997 d1s=0.1047
+[ 2577s] yellow  s0 PCT-v2 (single) + shrink   MAEg1s=0.2467 g2s=0.2836 d1s=0.1042
+[ 2577s] yellow  s0 PCT-E (ensemble x3) + shrink MAEg1s=0.2467 g2s=0.2870 d1s=0.1043
+[ 2577s] yellow  s0 GBM + shrink               MAEg1s=0.2467 g2s=0.2997 d1s=0.1038
+[ 2677s] yellow  s1 PCT-v2 (single)            MAEg1s=0.2399 g2s=0.2868 d1s=0.1008
+[ 2677s] yellow  s1 PCT-E (ensemble x3)        MAEg1s=0.2381 g2s=0.2887 d1s=0.0981
+[ 2677s] yellow  s1 GBM                        MAEg1s=0.4628 g2s=0.7059 d1s=0.0984
+[ 2677s] yellow  s1 PCT-v2 (single) + shrink   MAEg1s=0.2467 g2s=0.2941 d1s=0.1047
+[ 2677s] yellow  s1 PCT-E (ensemble x3) + shrink MAEg1s=0.2447 g2s=0.2926 d1s=0.1043
+[ 2677s] yellow  s1 GBM + shrink               MAEg1s=0.2467 g2s=0.2997 d1s=0.1036
+[ 2771s] yellow  s2 PCT-v2 (single)            MAEg1s=0.2358 g2s=0.2969 d1s=0.0970
+[ 2771s] yellow  s2 PCT-E (ensemble x3)        MAEg1s=0.2358 g2s=0.2875 d1s=0.0981
+[ 2771s] yellow  s2 GBM                        MAEg1s=0.3968 g2s=0.7570 d1s=0.0982
+[ 2771s] yellow  s2 PCT-v2 (single) + shrink   MAEg1s=0.2411 g2s=0.2997 d1s=0.1042
+[ 2771s] yellow  s2 PCT-E (ensemble x3) + shrink MAEg1s=0.2423 g2s=0.2875 d1s=0.1043
+[ 2771s] yellow  s2 GBM + shrink               MAEg1s=0.2467 g2s=0.2997 d1s=0.1036
+done

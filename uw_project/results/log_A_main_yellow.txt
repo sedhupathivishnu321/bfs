@@ -1,0 +1,32 @@
+recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
+[     1s] yellow  s0 Persistence                  MAEg1s=0.2467 MAEd1s=0.1047
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 5.8656322465822086e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[     2s] yellow  s0 AR(ridge)                    MAEg1s=0.5438 MAEd1s=0.1627
+[    16s] yellow  s0 GBM                          MAEg1s=0.4425 MAEd1s=0.0973
+[    39s] yellow  s0 LSTM                         MAEg1s=0.2479 MAEd1s=0.1061
+[    59s] yellow  s0 GRU                          MAEg1s=0.2464 MAEd1s=0.1053
+[    86s] yellow  s0 TCN                          MAEg1s=0.2492 MAEd1s=0.1030
+[   182s] yellow  s0 Transformer                  MAEg1s=0.2409 MAEd1s=0.1107
+[   227s] yellow  s0 PCT (proposed)               MAEg1s=0.2425 MAEd1s=0.0985
+[   227s] yellow  s1 Persistence                  MAEg1s=0.2467 MAEd1s=0.1047
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 5.8656322465822086e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[   228s] yellow  s1 AR(ridge)                    MAEg1s=0.5438 MAEd1s=0.1627
+[   242s] yellow  s1 GBM                          MAEg1s=0.4628 MAEd1s=0.0984
+[   263s] yellow  s1 LSTM                         MAEg1s=0.2460 MAEd1s=0.1040
+[   282s] yellow  s1 GRU                          MAEg1s=0.2483 MAEd1s=0.1053
+[   307s] yellow  s1 TCN                          MAEg1s=0.2523 MAEd1s=0.1019
+[   410s] yellow  s1 Transformer                  MAEg1s=0.2441 MAEd1s=0.1158
+[   452s] yellow  s1 PCT (proposed)               MAEg1s=0.2456 MAEd1s=0.0978
+[   453s] yellow  s2 Persistence                  MAEg1s=0.2467 MAEd1s=0.1047
+/usr/local/lib/python3.11/dist-packages/sklearn/linear_model/_ridge.py:227: LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 5.8656322465822086e-08.
+  return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+[   453s] yellow  s2 AR(ridge)                    MAEg1s=0.5438 MAEd1s=0.1627
+[   467s] yellow  s2 GBM                          MAEg1s=0.3968 MAEd1s=0.0982
+[   488s] yellow  s2 LSTM                         MAEg1s=0.2467 MAEd1s=0.1046
+[   508s] yellow  s2 GRU                          MAEg1s=0.2468 MAEd1s=0.1042
+[   533s] yellow  s2 TCN                          MAEg1s=0.2643 MAEd1s=0.1051
+[   637s] yellow  s2 Transformer                  MAEg1s=0.2479 MAEd1s=0.1096
+[   681s] yellow  s2 PCT (proposed)               MAEg1s=0.2394 MAEd1s=0.0995
+done 681.4142065048218

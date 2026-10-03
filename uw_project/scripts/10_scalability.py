@@ -18,15 +18,15 @@ for n in ("LSTM", "GRU", "TCN", "Transformer", "PCT"):
             reps = max(3, int(200 / N)); t = time.perf_counter()
             for _ in range(reps): m(x)
             lat = (time.perf_counter() - t) / reps * 1e3
-        tracemalloc.start(); 
-        with torch.no_grad(): m(x)
-        peak = tracemalloc.get_traced_memory()[1] / 2**20; tracemalloc.stop()
+        from torch.profiler import profile, ProfilerActivity
+        with torch.no_grad(), profile(activities=[ProfilerActivity.CPU], profile_memory=True) as prof: m(x)
+        peak = sum(max(e.self_cpu_memory_usage, 0) for e in prof.key_averages()) / 2**20      # MB of tensor memory allocated in one forward pass (upper bound on activations)
         mt = make_model(n, fin, 6, L=D.L, n_own=D.NF); opt = torch.optim.AdamW(mt.parameters()); xt = torch.randn(N * 4, D.L, fin); yt = torch.randn(N * 4, 6)
         t = time.perf_counter()
         for _ in range(3):
             for i in range(0, len(xt), 256):
                 loss = ((mt(xt[i:i + 256])[0] - yt[i:i + 256]) ** 2).mean(); opt.zero_grad(); loss.backward(); opt.step()
         tr = (time.perf_counter() - t) / 3
-        rows.append(dict(model=n, nodes=N, infer_ms_total=lat, infer_ms_per_node=lat / N, py_peak_MB=peak, train_s_per_epoch=tr))
+        rows.append(dict(model=n, nodes=N, infer_ms_total=lat, infer_ms_per_node=lat / N, act_alloc_MB=peak, train_s_per_epoch=tr))
         print(rows[-1], flush=True)
 pd.DataFrame(rows).to_csv(R / "results/scalability.csv", index=False)

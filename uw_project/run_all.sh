@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Full reproduction (≈ 3–4 h on 4 CPU cores, no GPU needed). Re-running resumes from existing results/*.csv.
 set -e
-export PYTHONPATH=src UWFC_THREADS=${UWFC_THREADS:-4}
+export PYTHONPATH=src UWFC_THREADS=${UWFC_THREADS:-4} OMP_NUM_THREADS=${UWFC_THREADS:-4}
 pip install -r requirements.txt
 # 1. data (CC-BY-4.0): optical BER tables + selected acoustic recordings (~3 GB)
 python - <<'PY'
@@ -21,7 +21,6 @@ python scripts/07_final.py --protocol B --seeds 3
 python scripts/09_robustness.py
 python scripts/04_complexity.py
 python scripts/10_scalability.py
-python scripts/05_analyze.py
 python scripts/08_make_plots.py
 python scripts/11_report.py
 pytest -q tests

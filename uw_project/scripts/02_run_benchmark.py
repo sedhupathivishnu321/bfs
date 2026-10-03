@@ -12,7 +12,7 @@ from uwfc import data as D, baselines as B, metrics as M, train as T
 ap = argparse.ArgumentParser()
 ap.add_argument("--protocol", default="A"); ap.add_argument("--suite", default="main", choices=["main", "ablation"])
 ap.add_argument("--seeds", type=int, default=3); ap.add_argument("--epochs", type=int, default=25)
-ap.add_argument("--fresh", action="store_true"); ap.add_argument("--folds", default="")  # comma list of test sites (A) to restrict
+ap.add_argument("--fresh", action="store_true"); ap.add_argument("--suffix", default=""); ap.add_argument("--folds", default="")  # comma list of test sites (A) to restrict
 a = ap.parse_args()
 
 feats = {p.stem: D.load_recording(p)[0] for p in sorted((R / "data/processed/features").glob("*.npz"))}
@@ -61,8 +61,8 @@ def ablation_suite(seed):
             "gain-only inputs": P(only_gain=True), "narrow (h=16)": P(h=16), "wide (h=64)": P(h=64), "shallow (dil 1,4)": P(dil=(1, 4))}
 
 
-out_csv = R / f"results/protocol{a.protocol}_{a.suite}.csv"
-errdir = R / f"results/errs/{a.protocol}_{a.suite}"; errdir.mkdir(parents=True, exist_ok=True)
+out_csv = R / f"results/protocol{a.protocol}_{a.suite}{a.suffix}.csv"
+errdir = R / f"results/errs/{a.protocol}_{a.suite}{a.suffix}"; errdir.mkdir(parents=True, exist_ok=True)
 done = {}
 if out_csv.exists() and not a.fresh:                       # resume after interruption (container restarts)
     for r_ in pd.read_csv(out_csv).to_dict("records"): done[(str(r_["fold"]), int(r_["seed"]), r_["model"])] = r_
@@ -78,7 +78,7 @@ for fold, tr, va, te in splits():
         suite = (main_suite if a.suite == "main" else ablation_suite)(seed)
         for mname, (kind, spec) in suite.items():
             key = (str(fold), seed, mname)
-            if key in done and (seed != 0 or errfile(fold, seed, mname).exists() or a.suite == "ablation"):
+            if key in done:
                 rows.append(done[key]); continue
             kw = dict(spec) if kind == "nn" else {}
             use_abs, use_ctx, only_gain = kw.pop("use_abs", True), kw.pop("use_ctx", True), kw.pop("only_gain", False)

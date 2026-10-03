@@ -20,7 +20,7 @@ Status per requested figure. **Produced** = computed from real measured data / t
 | 14 | NLL comparison | produced | `plots/B_uncertainty/14_nll_comparison.png` |
 | 15 | CRPS comparison | produced | `plots/B_uncertainty/15_crps_comparison.png` |
 | 16 | Sharpness vs coverage | produced | `plots/B_uncertainty/16_sharpness_vs_coverage.png` |
-| 17 | OOD uncertainty vs ID uncertainty | **not produced** | prerequisite results missing at generation time |
+| 17 | OOD uncertainty vs ID uncertainty | produced | `plots/B_uncertainty/17_ood_vs_id_uncertainty.png` |
 | 18 | Acoustic PDR vs distance | **not produced** | no PDR data |
 | 19 | Optical PDR vs distance | produced (adapted: BER instead of PDR (PDR not measured)) | `plots/C_link_optical/19_optical_ber_vs_distance_measured.png` |
 | 20 | Hybrid PDR vs distance | **not produced** | no hybrid link data |
@@ -51,26 +51,26 @@ Status per requested figure. **Produced** = computed from real measured data / t
 | 45 | vs heuristic controller | **not produced** | no controller |
 | 46 | vs oracle | **not produced** | no controller/oracle policy |
 | 47 | Remove physics prior | produced (adapted: AR/linear-extrapolation prior is the 'physics' prior here) | `plots/F_ablation/47_remove_physics_prior.png` |
-| 48 | Remove graph structure | **not produced** | prerequisite results missing at generation time |
+| 48 | Remove graph structure | produced (adapted: cross-receiver context stands in for graph structure) | `plots/F_ablation/48_remove_cross_receiver_context.png` |
 | 49 | Remove temporal module | **not produced** | temporal-module ablation was not run |
-| 50 | Remove uncertainty | **not produced** | prerequisite results missing at generation time |
+| 50 | Remove uncertainty | produced (adapted: heteroscedastic head) | `plots/F_ablation/50_remove_uncertainty_head.png` |
 | 51 | Remove risk constraints | **not produced** | no risk constraints in this forecaster |
 | 52 | Ensemble size | produced | `plots/F_ablation/52_ensemble_size.png` |
 | 53 | Real/DT data ratio | **not produced** | no digital-twin/simulated data in this project |
 | 54 | Model mismatch | **not produced** | no simulator to mismatch (cross-site tests are in 65) |
 | 55 | DT staleness | **not produced** | see 67 (stale observations) |
 | 56 | Node failure | **not produced** | node-failure experiment not run (sensor dropout in 63) |
-| 57 | Inference latency vs nodes | **not produced** | prerequisite results missing at generation time |
-| 58 | CPU/GPU memory vs nodes | **not produced** | prerequisite results missing at generation time |
-| 59 | Training time vs nodes | **not produced** | prerequisite results missing at generation time |
+| 57 | Inference latency vs nodes | produced (adapted: CPU only, no GPU; per-node forecasters) | `plots/G_scalability/57_inference_latency_vs_nodes.png` |
+| 58 | CPU/GPU memory vs nodes | produced (adapted: CPU only, no GPU; per-node forecasters) | `plots/G_scalability/58_memory_vs_nodes.png` |
+| 59 | Training time vs nodes | produced (adapted: CPU only, no GPU; per-node forecasters) | `plots/G_scalability/59_training_time_vs_nodes.png` |
 | 60 | Throughput vs nodes | **not produced** | no link-level throughput model |
 | 61 | PDR vs nodes | **not produced** | no PDR data |
 | 62 | Energy vs nodes | **not produced** | no energy data |
-| 63 | Sensor dropout | **not produced** | prerequisite results missing at generation time |
+| 63 | Sensor dropout | produced | `plots/H_robustness/63_sensor_dropout.png` |
 | 64 | Channel-model mismatch | **not produced** | no channel-model simulator |
 | 65 | Environmental mismatch | produced (adapted: unseen site = unseen environment) | `plots/H_robustness/65_unseen_environment.png` |
-| 66 | Noisy observations | **not produced** | prerequisite results missing at generation time |
-| 67 | Stale DT | **not produced** | prerequisite results missing at generation time |
+| 66 | Noisy observations | produced | `plots/H_robustness/66_noisy_observations.png` |
+| 67 | Stale DT | produced (adapted: 'stale DT' = stale observations) | `plots/H_robustness/67_stale_dt.png` |
 | 68 | Unseen distances | produced (optical only; right panel of figure 3) | `plots/A_prediction/03_actual_vs_pred_optical_ber.png` |
 | 69 | Unseen turbidity | produced (adapted: unseen water medium, optical BER) | `plots/H_robustness/69_unseen_medium_optical.png` |
 | 70 | Unseen acoustic conditions | produced (same figure as 65) | `plots/H_robustness/65_unseen_environment.png` |
