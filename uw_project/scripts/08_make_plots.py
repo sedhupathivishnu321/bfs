@@ -236,9 +236,10 @@ WHY = {2: "no optical SNR in the public optical dataset (BER only)", 4: "PDR/pac
  37: "no physics-only (BELLHOP/optical-physics) model implemented; the 'AR prior' ablation (47) is the closest", 38: "no separate data-only variant of this model; see ablations", 43: "no graph model implemented (cross-receiver context ablation is 48)", 44: "no MAPPO/controller", 45: "no controller", 46: "no controller/oracle policy",
  49: "temporal-module ablation was not run", 51: "no risk constraints in this forecaster", 53: "no digital-twin/simulated data in this project", 54: "no simulator to mismatch (cross-site tests are in 65)", 55: "see 67 (stale observations)", 56: "node-failure experiment not run (sensor dropout in 63)",
  60: "no link-level throughput model", 61: "no PDR data", 62: "no energy data", 64: "no channel-model simulator", 70: "see 65", 8: "", 1: "", 3: ""}
-lines = ["# Figure index (70 requested)", "", "Status per requested figure. **Produced** = computed from real measured data / trained models in this repo. **Not produced** = the real datasets cannot support it (no fabrication). Titles marked *adapted* differ from the request as stated.", "",
+lines = ["# (superseded by 16_sim_plots.py) Figure index (70 requested)", "", "Status per requested figure. **Produced** = computed from real measured data / trained models in this repo. **Not produced** = the real datasets cannot support it (no fabrication). Titles marked *adapted* differ from the request as stated.", "",
          "| # | Requested | Status | File / reason |", "|---|---|---|---|"]
 for n in range(1, 71):
     if n in status: lines.append(f"| {n} | {REQ[n]} | {status[n][0]} | `{status[n][1]}` |")
     else: lines.append(f"| {n} | {REQ[n]} | **not produced** | {WHY.get(n, 'prerequisite results missing at generation time')} |")
-(OUT / "INDEX.md").write_text("\n".join(lines)); print(f"produced {len(status)} / 70"); 
+json.dump({str(k): v for k, v in status.items()}, open(OUT / "status_real.json", "w")); print(f"produced {len(status)} / 70 (real-data figures)")
+
