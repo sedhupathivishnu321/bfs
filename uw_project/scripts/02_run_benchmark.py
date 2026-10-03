@@ -78,7 +78,7 @@ for fold, tr, va, te in splits():
         suite = (main_suite if a.suite == "main" else ablation_suite)(seed)
         for mname, (kind, spec) in suite.items():
             key = (str(fold), seed, mname)
-            if key in done and (seed != 0 or errfile(fold, seed, mname).exists()):
+            if key in done and (seed != 0 or errfile(fold, seed, mname).exists() or a.suite == "ablation"):
                 rows.append(done[key]); continue
             kw = dict(spec) if kind == "nn" else {}
             use_abs, use_ctx, only_gain = kw.pop("use_abs", True), kw.pop("use_ctx", True), kw.pop("only_gain", False)

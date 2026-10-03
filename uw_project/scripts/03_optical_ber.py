@@ -36,12 +36,13 @@ X = lambda d: np.c_[d.rate, d.bits, d.dist, d.pump, d.rate * d.bits, d.rate ** 2
 models = {"Mean": None, "Ridge(poly)": lambda: make_pipeline(StandardScaler(), Ridge(1.0)),
           "GBM": lambda: GradientBoostingRegressor(n_estimators=150, max_depth=2, learning_rate=.05, random_state=0),
           "MLP": lambda: make_pipeline(StandardScaler(), MLPRegressor(hidden_layer_sizes=(32, 32), alpha=1e-2, max_iter=3000, random_state=0))}
-res = []
+res = []; preds = []
 def run(split_name, folds):
     for te_name, tr, te in folds:
         for m, mk in models.items():
             p = np.full(len(te), D.y.iloc[tr].mean()) if mk is None else mk().fit(X(D.iloc[tr]), D.y.iloc[tr]).predict(X(D.iloc[te]))
             e = p - D.y.iloc[te].values
+            preds.append(pd.DataFrame(dict(split=split_name, held_out=te_name, model=m, medium=D.medium.iloc[te].values, dist=D.dist.iloc[te].values, rate=D.rate.iloc[te].values, bits=D.bits.iloc[te].values, y_true=D.y.iloc[te].values, y_pred=p)))
             # mode-selection utility: pick highest-rate*bits config meeting BER<=1e-3 -> does the predicted-feasible set match?
             feas_t = D.ber.iloc[te].values <= 1e-3; feas_p = 10 ** p <= 1e-3
             res.append(dict(split=split_name, held_out=te_name, model=m, MAE_log10=np.abs(e).mean(), RMSE_log10=np.sqrt((e ** 2).mean()),
@@ -49,5 +50,6 @@ def run(split_name, folds):
 idx = np.arange(len(D))
 run("LODO", [(f"{d}cm", idx[D.dist != d], idx[D.dist == d]) for d in sorted(D.dist.unique())])
 run("LOMO", [(m, idx[D.medium != m], idx[D.medium == m]) for m in ("clean", "pump")])
+pd.concat(preds).to_csv(R / 'results/optical_predictions.csv', index=False)
 Rs = pd.DataFrame(res); Rs.to_csv(R / "results/optical_ber.csv", index=False)
 print(Rs.groupby(["split", "model"])[["MAE_log10", "RMSE_log10", "feas_acc"]].mean().round(3))

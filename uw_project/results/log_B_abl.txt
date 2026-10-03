@@ -36,3 +36,4 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [   119s] within  s0 PCT full                     MAEg1s=0.5962 MAEd1s=0.1891
 [   219s] within  s0 - AR prior                   MAEg1s=0.5946 MAEd1s=0.1912
+recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']

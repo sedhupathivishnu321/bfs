@@ -27,10 +27,10 @@ def load_recording(path):
     return F, str(z["desc"])
 
 
-def make_windows(F, t_lo, t_hi, stride=2):
+def make_windows(F, t_lo, t_hi, stride=2, return_meta=False):
     """Windows whose input AND target all lie inside [t_lo, t_hi) -> no cross-boundary leakage."""
     T, R, _ = F.shape
-    X, C, Y, last = [], [], [], []
+    X, C, Y, last, TI, RI = [], [], [], [], [], []
     hmax = max(HSTEPS)
     for t in range(t_lo + L, t_hi - hmax, stride):          # t = first future index
         w = F[t - L:t]                                        # (L,R,NF)
@@ -39,10 +39,11 @@ def make_windows(F, t_lo, t_hi, stride=2):
             others = np.delete(w, r, axis=1)
             ctx = others.mean(1) if others.shape[1] else np.zeros_like(own)
             y = np.stack([F[t - 1 + h, r, list(TGT)] - own[-1, list(TGT)] for h in HSTEPS])  # (H,2)
-            X.append(own); C.append(ctx); Y.append(y.ravel()); last.append(own[-1])
+            X.append(own); C.append(ctx); Y.append(y.ravel()); last.append(own[-1]); TI.append(t); RI.append(r)
     if not X:
         return None
-    return np.stack(X).astype(np.float32), np.stack(C).astype(np.float32), np.stack(Y).astype(np.float32), np.stack(last).astype(np.float32)
+    out = (np.stack(X).astype(np.float32), np.stack(C).astype(np.float32), np.stack(Y).astype(np.float32), np.stack(last).astype(np.float32))
+    return out + (np.array(TI), np.array(RI)) if return_meta else out
 
 
 class Norm:

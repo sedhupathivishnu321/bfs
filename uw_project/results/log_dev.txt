@@ -14,3 +14,17 @@
 [  348s] test=purple  val=red     l1                   g1=0.9373 g2=0.8560 d1=0.5132
 [  373s] test=purple  val=red     l1+drop.2            g1=0.9498 g2=0.8626 d1=0.5182
 [  398s] test=purple  val=red     l1+wd1e-2            g1=0.9373 g2=0.8560 d1=0.5132
+[  423s] test=red     val=yellow  base                 g1=0.2414 g2=0.2846 d1=0.1020
+[  472s] test=red     val=yellow  l1                   g1=0.2413 g2=0.2844 d1=0.1019
+[  529s] test=red     val=yellow  l1+drop.2            g1=0.2413 g2=0.2849 d1=0.1023
+[  569s] test=red     val=yellow  l1+wd1e-2            g1=0.2413 g2=0.2844 d1=0.1019
+[  598s] test=yellow  val=black   base                 g1=0.0487 g2=0.0476 d1=0.0055
+[  626s] test=yellow  val=black   l1                   g1=0.0487 g2=0.0475 d1=0.0055
+[  653s] test=yellow  val=black   l1+drop.2            g1=0.0477 g2=0.0475 d1=0.0054
+[  681s] test=yellow  val=black   l1+wd1e-2            g1=0.0487 g2=0.0475 d1=0.0055
+           val_g1  val_g2  val_d1   score
+cand                                     
+l1+drop.2  0.5094  0.5641  0.2214  0.5368
+base       0.5088  0.5697  0.2187  0.5393
+l1+wd1e-2  0.5091  0.5701  0.2181  0.5396
+l1         0.5092  0.5701  0.2182  0.5396
