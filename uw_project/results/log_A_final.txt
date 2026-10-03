@@ -15,3 +15,32 @@
 [  483s] black   s1 PCT-v2 (single) + shrink   MAEg1s=0.0734 g2s=0.1093 d1s=0.0149
 [  483s] black   s1 PCT-E (ensemble x3) + shrink MAEg1s=0.0658 g2s=0.0886 d1s=0.0122
 [  483s] black   s1 GBM + shrink               MAEg1s=0.0544 g2s=0.1245 d1s=0.0048
+[  685s] black   s2 PCT-v2 (single)            MAEg1s=0.0594 g2s=0.0703 d1s=0.0190
+[  685s] black   s2 PCT-E (ensemble x3)        MAEg1s=0.0525 g2s=0.0526 d1s=0.0155
+[  685s] black   s2 GBM                        MAEg1s=0.0785 g2s=0.1615 d1s=0.0122
+[  685s] black   s2 PCT-v2 (single) + shrink   MAEg1s=0.0523 g2s=0.0740 d1s=0.0073
+[  685s] black   s2 PCT-E (ensemble x3) + shrink MAEg1s=0.0473 g2s=0.0536 d1s=0.0056
+[  685s] black   s2 GBM + shrink               MAEg1s=0.0544 g2s=0.1245 d1s=0.0048
+[  954s] blue    s0 PCT-v2 (single)            MAEg1s=0.6666 g2s=0.8948 d1s=0.1311
+[  954s] blue    s0 PCT-E (ensemble x3)        MAEg1s=0.6726 g2s=0.8996 d1s=0.1273
+[  954s] blue    s0 GBM                        MAEg1s=0.6605 g2s=0.8945 d1s=0.1270
+[  954s] blue    s0 LSTM                       MAEg1s=0.6750 g2s=0.9613 d1s=0.1165
+[  954s] blue    s0 GRU                        MAEg1s=0.6798 g2s=0.9620 d1s=0.1193
+[  954s] blue    s0 TCN                        MAEg1s=0.6845 g2s=0.9658 d1s=0.1196
+[  954s] blue    s0 Transformer                MAEg1s=0.6650 g2s=0.9299 d1s=0.1147
+[  954s] blue    s0 Persistence                MAEg1s=0.6752 g2s=0.9645 d1s=0.1154
+[  954s] blue    s0 PCT-v2 (single) + shrink   MAEg1s=0.6594 g2s=0.8926 d1s=0.1223
+[  954s] blue    s0 PCT-E (ensemble x3) + shrink MAEg1s=0.6648 g2s=0.8969 d1s=0.1233
+[  954s] blue    s0 GBM + shrink               MAEg1s=0.6435 g2s=0.8970 d1s=0.1202
+[ 1037s] blue    s1 PCT-v2 (single)            MAEg1s=0.6817 g2s=0.9021 d1s=0.1302
+[ 1037s] blue    s1 PCT-E (ensemble x3)        MAEg1s=0.6791 g2s=0.8878 d1s=0.1299
+[ 1037s] blue    s1 GBM                        MAEg1s=0.6605 g2s=0.8945 d1s=0.1270
+[ 1037s] blue    s1 PCT-v2 (single) + shrink   MAEg1s=0.6767 g2s=0.8946 d1s=0.1240
+[ 1037s] blue    s1 PCT-E (ensemble x3) + shrink MAEg1s=0.6696 g2s=0.8850 d1s=0.1238
+[ 1037s] blue    s1 GBM + shrink               MAEg1s=0.6435 g2s=0.8970 d1s=0.1202
+[ 1162s] blue    s2 PCT-v2 (single)            MAEg1s=0.6728 g2s=0.8830 d1s=0.1355
+[ 1162s] blue    s2 PCT-E (ensemble x3)        MAEg1s=0.6685 g2s=0.8894 d1s=0.1287
+[ 1162s] blue    s2 GBM                        MAEg1s=0.6605 g2s=0.8945 d1s=0.1270
+[ 1162s] blue    s2 PCT-v2 (single) + shrink   MAEg1s=0.6684 g2s=0.8823 d1s=0.1256
+[ 1162s] blue    s2 PCT-E (ensemble x3) + shrink MAEg1s=0.6644 g2s=0.8896 d1s=0.1246
+[ 1162s] blue    s2 GBM + shrink               MAEg1s=0.6435 g2s=0.8970 d1s=0.1202
