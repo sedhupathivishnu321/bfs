@@ -1,0 +1,16 @@
+[   68s] test=black   val=blue    base                 g1=0.6616 g2=0.9283 d1=0.1234
+[  123s] test=black   val=blue    l1                   g1=0.6616 g2=0.9284 d1=0.1234
+[  200s] test=black   val=blue    l1+drop.2            g1=0.6461 g2=0.8953 d1=0.1296
+[  241s] test=black   val=blue    l1+wd1e-2            g1=0.6616 g2=0.9284 d1=0.1234
+[   46s] test=black   val=blue    base                 g1=0.6616 g2=0.9283 d1=0.1234
+[   71s] test=black   val=blue    l1                   g1=0.6616 g2=0.9284 d1=0.1234
+[  110s] test=black   val=blue    l1+drop.2            g1=0.6461 g2=0.8953 d1=0.1296
+[  158s] test=black   val=blue    l1+wd1e-2            g1=0.6616 g2=0.9284 d1=0.1234
+[  198s] test=blue    val=purple  base                 g1=0.6562 g2=0.7325 d1=0.3483
+[  239s] test=blue    val=purple  l1                   g1=0.6569 g2=0.7340 d1=0.3468
+[  278s] test=blue    val=purple  l1+drop.2            g1=0.6624 g2=0.7299 d1=0.3513
+[  297s] test=blue    val=purple  l1+wd1e-2            g1=0.6564 g2=0.7345 d1=0.3466
+[  323s] test=purple  val=red     base                 g1=0.9363 g2=0.8554 d1=0.5141
+[  348s] test=purple  val=red     l1                   g1=0.9373 g2=0.8560 d1=0.5132
+[  373s] test=purple  val=red     l1+drop.2            g1=0.9498 g2=0.8626 d1=0.5182
+[  398s] test=purple  val=red     l1+wd1e-2            g1=0.9373 g2=0.8560 d1=0.5132

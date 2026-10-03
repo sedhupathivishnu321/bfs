@@ -96,3 +96,17 @@ recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
 [     2s] black   s0 Persistence                  MAEg1s=0.0423 MAEd1s=0.0031
 [     2s] black   s0 AR(ridge)                    MAEg1s=0.2478 MAEd1s=0.0758
+[   164s] black   s0 GBM                          MAEg1s=0.0785 MAEd1s=0.0122
+[   175s] black   s0 LSTM                         MAEg1s=0.0566 MAEd1s=0.0347
+[   194s] black   s0 GRU                          MAEg1s=0.1090 MAEd1s=0.0573
+[   219s] black   s0 TCN                          MAEg1s=0.2217 MAEd1s=0.1216
+recordings 14 sites ['black', 'blue', 'purple', 'red', 'yellow']
+[    91s] black   s0 Transformer                  MAEg1s=0.1660 MAEd1s=0.0917
+[   113s] black   s0 PCT (proposed)               MAEg1s=0.0457 MAEd1s=0.0086
+[   113s] black   s1 Persistence                  MAEg1s=0.0423 MAEd1s=0.0031
+[   114s] black   s1 AR(ridge)                    MAEg1s=0.2478 MAEd1s=0.0758
+[   279s] black   s1 GBM                          MAEg1s=0.0785 MAEd1s=0.0122
+[   291s] black   s1 LSTM                         MAEg1s=0.0495 MAEd1s=0.0264
+[   314s] black   s1 GRU                          MAEg1s=0.3007 MAEd1s=0.1354
+[   333s] black   s1 TCN                          MAEg1s=0.0857 MAEd1s=0.0652
+[   386s] black   s1 Transformer                  MAEg1s=0.1087 MAEd1s=0.0895
