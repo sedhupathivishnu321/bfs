@@ -19,10 +19,16 @@
 > all, so the TPU story is now just: device selection with GPU/CPU fallback, bf16 autocast with an fp32
 > self-heal, and `NUM_WORKERS=0` -- all explained in the notebook's own "Model" and "What changed for TPU"
 > sections, including why 99% accuracy is not an honest target on this benchmark regardless of model choice.
-> Select **Settings -> Accelerator -> TPU VM v3-8** before running. Rebuild it with
+> It's also robust to **"Internet access disabled"** (required for an actual competition submission, per
+> that competition's Code Requirements): a fast up-front connectivity check skips the useless `torch_xla`
+> pip-install attempt and makes an unreachable pretrained-weight download fail in milliseconds instead of
+> retrying for minutes, falling back to random-initialised features with a clear warning rather than
+> hanging -- fixed after a real offline Kaggle run showed both costing several minutes each. Select
+> **Settings -> Accelerator -> TPU VM v3-8** before running. Rebuild it with
 > `python notebooks/build_kaggle_notebook_tpu_v2.py`. It was smoke-tested end-to-end (train and infer modes,
-> including the single-class and extreme-skew classifier fallbacks) on CPU with synthetic DICOM data; no TPU
-> scores have been measured yet, since TPU hardware isn't available in this development environment.
+> including the single-class/extreme-skew classifier fallbacks and the no-internet fallback path) on CPU
+> with synthetic DICOM data; no TPU scores have been measured yet, since TPU hardware isn't available in
+> this development environment.
 
 This is a reproducible, leakage-safe pipeline for the Kaggle competition
 [RSNA Knee Abnormality Detection](https://www.kaggle.com/competitions/rsna-knee-abnormality-detection).

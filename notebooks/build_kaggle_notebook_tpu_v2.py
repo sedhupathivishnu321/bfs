@@ -116,7 +116,41 @@ DICOM trees (`train_series`/`test_series`) instead of descending into them. The 
 attached under either convention is still found instead of requiring an exact path match. This generalises
 the same idea used for asset discovery in other Kaggle inference notebooks; only the general technique
 (check both mount shapes, walk with bounded depth, skip the big series folders) is reused here, not any
-specific paths, checkpoints, or code from elsewhere.
+specific paths, checkpoints, or code from elsewhere. Confirmed on a real Kaggle run: the competition data
+there was mounted at `/kaggle/input/competitions/<slug>` -- a third convention, but just one more level of
+nesting under a path `_kaggle_roots()` already lists, so the existing bounded-depth walk found it without
+any change needed.
+
+## Robustness to a no-internet run
+
+**Code Requirements for this competition mandate "Internet access disabled"** for an actual submission
+notebook -- so a run with no internet isn't a misconfiguration to guard against, it's the real target
+environment. Two things that assume internet is reachable are made to fail fast and degrade instead of
+burning the run's time budget or hanging:
+
+* **`check_internet()`** does a DNS+TCP connect to the actual hosts pip/Hugging Face Hub would need (PyPI,
+  Hugging Face), each bounded to ~2s, once, as the very first thing the notebook does (`ONLINE`) --
+  before even `import timm`. That ordering matters: if offline, the cell sets `os.environ["HF_HUB_OFFLINE"]
+  = "1"` *before* `import timm` (which imports `huggingface_hub`), because `huggingface_hub` reads that
+  variable into a module-level constant once, at its own import time, and never re-reads it -- setting it
+  later (e.g. inside `make_encoder()`, right before the one call that needs it) silently does nothing, and
+  a `pretrained=True` load falls through to the real, slowly-failing network path regardless. Observed on a
+  real no-internet Kaggle run: without the early `ONLINE` check, the `torch_xla` pip-install fallback alone
+  retried for **7+ minutes** (pip's own backoff against an unreachable index) before giving up -- entirely
+  wasted, since there was nothing to install either way. `setup_device()` now skips that attempt outright
+  when `not ONLINE`.
+* **`make_encoder()`** prefers a local checkpoint (`CFG.BACKBONE_WEIGHTS_PATH`) if one is set, which is what
+  a real no-internet submission needs: the pretrained CNN weights must come from an attached Kaggle
+  dataset/model, not a live download (competition rules explicitly allow attaching public pretrained models
+  for this reason). Failing that, `HF_HUB_OFFLINE` (set early, as above) makes an offline `pretrained=True`
+  load fail in milliseconds instead of retrying for minutes per candidate filename (also observed on the
+  same run -- `pretrained=True` with no internet and no local checkpoint cost several more minutes of
+  retries before this fix). Either way, any remaining failure (including an invalid/unresolvable
+  pretrained-weight *tag*, which raises even with `pretrained=False`) falls back to the bare architecture
+  with random-initialised weights and a printed warning, rather than hanging or crashing -- a degraded
+  model is recoverable; a notebook that never finishes is not. The feature cache is keyed by backbone name
+  and by whether real pretrained weights actually loaded (`extract_features`'s `feat_tag`), so a run that
+  fell back to random init never silently reuses -- or gets reused by -- a cache built with real weights.
 
 ## What this model can honestly achieve (please read before trusting any number below)
 
@@ -161,7 +195,12 @@ class CFG:
     IMG = 224                      # in-plane size
     # frozen feature extractor (NOT fine-tuned -- see "Model" markdown above)
     BACKBONE = "tf_efficientnet_b0.ns_jft_in1k"         # alternatives: "convnext_nano.in12k_ft_in1k", "resnet34.a1_in1k"
-    PRETRAINED = True              # needs internet in MODE="train"
+    PRETRAINED = True              # needs internet, or BACKBONE_WEIGHTS_PATH, when internet is OFF
+    BACKBONE_WEIGHTS_PATH = None   # local timm checkpoint (.safetensors/.pth), e.g. from an attached Kaggle
+                                    # dataset/model -- set this for a real no-internet submission run (Code
+                                    # Requirements mandates "Internet access disabled"); otherwise, with no
+                                    # internet and no local checkpoint, make_encoder() falls back to random
+                                    # init rather than hanging on an unreachable download.
     FEAT_BATCH = 8                 # studies per forward pass through the frozen encoder
     # classifier: enhanced logistic regression, one independent binary model per label
     FOLDS = 5
@@ -189,7 +228,32 @@ if os.environ.get("KNEE_SMOKE") == "1":   # used only by the author's CPU smoke 
 os.makedirs(CFG.CACHE_DIR, exist_ok=True); os.makedirs(CFG.OUT_DIR, exist_ok=True)
 print({k: v for k, v in vars(CFG).items() if not k.startswith("_")})"""))
 
-C.append(code(r"""import numpy as np, pandas as pd, torch, torch.nn as nn, torch.nn.functional as F
+C.append(code(r"""import os as _os_early
+
+def check_internet(hosts=(("pypi.org", 443), ("huggingface.co", 443)), timeout=2.0):
+    # A real DNS+TCP check against the actual hosts pip/Hugging Face Hub would need, each bounded to a
+    # couple of seconds. Used to skip network attempts that would otherwise retry for minutes (pip's own
+    # backoff, HF Hub downloads) before failing anyway -- a real cost observed on a "Internet access
+    # disabled" Kaggle run (required for an actual competition submission; see Code Requirements), where
+    # either can burn 5+ minutes for nothing.
+    import socket
+    for host, port in hosts:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
+ONLINE = check_internet()
+print("internet:", ONLINE)
+if not ONLINE:
+    # Must happen before `import timm` (which imports huggingface_hub): HF_HUB_OFFLINE is read into a
+    # module-level constant once, at huggingface_hub's own import time, not re-read per call -- setting it
+    # any later (e.g. inside make_encoder(), right before the download) silently has no effect at all, and
+    # a pretrained=True load falls through to the real (failing, multi-minute-retrying) network path.
+    _os_early.environ["HF_HUB_OFFLINE"] = "1"
+
+import numpy as np, pandas as pd, torch, torch.nn as nn, torch.nn.functional as F
 import cv2, pydicom, timm, pickle
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.metrics import roc_auc_score
@@ -211,6 +275,9 @@ def setup_device():
     try:
         import torch_xla.core.xla_model as _xm
     except ImportError:
+        if not ONLINE:
+            print("torch_xla not preinstalled and no internet to install it; using GPU/CPU instead.")
+            return torch.device("cuda" if torch.cuda.is_available() else "cpu")
         try:
             import subprocess, sys
             ver = torch.__version__.split("+")[0]
@@ -506,15 +573,51 @@ STD_RGB = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(DEVICE)
 def make_encoder():
     # Frozen: an ImageNet-pretrained CNN used purely as a feature extractor. Nothing here is trained --
     # see the "Model" markdown above for why a fine-tuned CNN was replaced by this + logistic regression.
-    enc = timm.create_model(CFG.BACKBONE, pretrained=CFG.PRETRAINED, num_classes=0, in_chans=3).to(DEVICE).eval()
+    # Pretrained weights, in order of preference: a local checkpoint (CFG.BACKBONE_WEIGHTS_PATH, e.g. from
+    # an attached Kaggle dataset/model -- required for a real submission run, since Code Requirements
+    # mandates "Internet access disabled"), then a live download if online, then random init as a last
+    # resort so a missing/unreachable checkpoint degrades instead of hanging or crashing the whole run.
+    # enc._pretrained_loaded records which happened, so extract_features's cache tag can tell a weak
+    # (random-init) feature cache apart from a real one instead of silently reusing one for the other.
+    pretrained_loaded = False
+    if CFG.BACKBONE_WEIGHTS_PATH and os.path.exists(CFG.BACKBONE_WEIGHTS_PATH):
+        enc = timm.create_model(CFG.BACKBONE, pretrained=False, checkpoint_path=CFG.BACKBONE_WEIGHTS_PATH,
+                                num_classes=0, in_chans=3)
+        pretrained_loaded = True
+    else:
+        # HF_HUB_OFFLINE is already set (if needed) from before `import timm`, above, so an unreachable
+        # download fails in milliseconds here rather than retrying for minutes.
+        try:
+            enc = timm.create_model(CFG.BACKBONE, pretrained=CFG.PRETRAINED, num_classes=0, in_chans=3)
+            pretrained_loaded = CFG.PRETRAINED
+        except Exception as e:
+            print(f"Could not load pretrained weights for {CFG.BACKBONE} ({e!r}); falling back to random "
+                  f"initialisation -- features (and anything fit on them) will be far weaker. For a real "
+                  f"no-internet submission, attach a Kaggle dataset/model with these weights and set "
+                  f"CFG.BACKBONE_WEIGHTS_PATH to the local file.")
+            # Strip any ".tag" suffix for this attempt: it's only pretrained-weight metadata, and if the
+            # first attempt failed because the tag itself doesn't resolve, the tagged name would fail here
+            # too even with pretrained=False -- the bare architecture name always resolves.
+            enc = timm.create_model(CFG.BACKBONE.split(".")[0], pretrained=False, num_classes=0, in_chans=3)
+    enc = enc.to(DEVICE).eval()
+    enc._pretrained_loaded = pretrained_loaded
     for p in enc.parameters(): p.requires_grad_(False)
     return enc
+
+def feat_tag(enc, split, n):
+    # Encodes everything that changes the resulting feature values, so a stale cache from a different
+    # backbone -- or from a run that fell back to random-init weights -- is never silently reused for one
+    # that didn't (see make_encoder's enc._pretrained_loaded).
+    backbone = CFG.BACKBONE.replace(".", "_").replace("/", "_")
+    tag = "pretrained" if enc._pretrained_loaded else "randinit"
+    return f"{split}_{backbone}_{tag}_{CFG.SLICES}x{CFG.IMG}_{n}"
 
 @torch.no_grad()
 def extract_features(enc, vol, mask, tag):
     '''Per study, per plane: mean AND std (over the plane's slices) of the 3-slice-window embedding --
-    richer than mean alone (see "Model" markdown). Cached to CFG.CACHE_DIR by `tag` since the encoder
-    never changes across folds -- unlike backprop training, there is nothing fold-specific to recompute.'''
+    richer than mean alone (see "Model" markdown). Cached to CFG.CACHE_DIR by `tag` (build one with
+    feat_tag) since the encoder never changes across folds -- unlike backprop training, there is nothing
+    fold-specific to recompute.'''
     path = f"{CFG.CACHE_DIR}/{tag}_feat.npy"
     if os.path.exists(path):
         return np.load(path)
@@ -603,7 +706,7 @@ C.append(code(r"""if CFG.MODE == "train":
         folds[te] = f
 
     enc = make_encoder()
-    FEAT = extract_features(enc, VOL, MASK, f"train_{CFG.SLICES}x{CFG.IMG}_{len(VOL)}")
+    FEAT = extract_features(enc, VOL, MASK, feat_tag(enc, "train", len(VOL)))
     del enc
     if DEVICE.type == "cuda": torch.cuda.empty_cache()
     print("features ready", FEAT.shape, elapsed())
@@ -679,7 +782,7 @@ if CFG.MODE == "infer" and os.path.exists(f"{wdir}/config.json"):
 TVOL, TMASK = build_cache("test", test.StudyInstanceUID.tolist())
 paths = sorted(glob.glob(f"{wdir}/fold*.pkl")); assert paths, f"no fold*.pkl in {wdir}"
 enc = make_encoder()
-Ftest = extract_features(enc, TVOL, TMASK, f"test_{CFG.SLICES}x{CFG.IMG}_{len(TVOL)}")
+Ftest = extract_features(enc, TVOL, TMASK, feat_tag(enc, "test", len(TVOL)))
 del enc
 if DEVICE.type == "cuda": torch.cuda.empty_cache()
 preds = []
