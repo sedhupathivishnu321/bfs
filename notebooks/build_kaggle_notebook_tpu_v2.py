@@ -2,12 +2,14 @@
 
     python notebooks/build_kaggle_notebook_tpu_v2.py
 
-This is the TPU port of notebooks/rsna_knee_kaggle.ipynb (built by build_kaggle_notebook.py, GPU-only).
-Same pipeline, same model, same evaluation; only what's needed to run on a single PyTorch/XLA TPU core
-without erroring changed. Every change is explained in the notebook's own markdown ("What changed for
-TPU") and in the inline comments next to the code it touches. The rule-based multilingual report labeler
-is embedded verbatim from src/kneemor/report_labeler.py via %%writefile, so the notebook has no dependency
-on this repository at run time.
+Model: an enhanced logistic-regression classifier (one per label) on frozen, pretrained-CNN features,
+in place of the earlier MV-MoRE/transformer hybrid head -- see the notebook's own "Model" markdown for
+why and what "enhanced" means concretely. The TPU/XLA device handling, Kaggle input-path detection and
+labeling pipeline are carried over unchanged from the prior revision of this notebook; a frozen-feature
+forward pass has none of the backward-pass dynamic-shape concerns that motivated most of the earlier
+TPU-specific rewrites, so that part of the story is now much simpler. The rule-based multilingual report
+labeler is embedded verbatim from src/kneemor/report_labeler.py via %%writefile, so the notebook has no
+dependency on this repository at run time.
 """
 import pathlib
 
@@ -19,17 +21,12 @@ LABELER_SRC = (ROOT / "src/kneemor/report_labeler.py").read_text()
 md, code = nbf.v4.new_markdown_cell, nbf.v4.new_code_cell
 C = []
 
-C.append(md(r"""# RSNA Knee Abnormality Detection: 2.5-D hybrid CNN (train + infer) — V2 (TPU)
+C.append(md(r"""# RSNA Knee Abnormality Detection: enhanced logistic regression on frozen CNN features — V2 (TPU)
 
 This is a self-contained Kaggle notebook for the **TPU v3-8** accelerator: open **Settings -> Accelerator**
 and pick **TPU VM v3-8**, turn **Internet** on, then **Run All**.
 
-This is the TPU port of the GPU notebook `notebooks/rsna_knee_kaggle.ipynb` in the same repo. The pipeline,
-model and evaluation are unchanged; only what's needed to run correctly on a single PyTorch/XLA TPU core
-changed, listed below with the reasoning. If TPU isn't actually selected (or torch_xla can't reach a TPU),
-the notebook falls back to GPU, then CPU, instead of crashing.
-
-**Pipeline** (unchanged from the GPU version)
+**Pipeline**
 1. **Labels.** 58 training studies carry expert labels; the other ~4,350 have only a free-text report in
    one of eight languages. Two labelers turn those reports into training labels:
    * a multilingual rule labeler;
@@ -39,61 +36,65 @@ the notebook falls back to GPU, then CPU, instead of crashing.
 2. **Preprocessing.** For each plane (sagittal, coronal, axial) it takes the best fluid-sensitive series,
    sorts it along the slice normal, resamples it to `SLICES` slices at `IMG` px, and caches the volume as
    uint8.
-3. **Model: 2.5-D hybrid.**
-   * An ImageNet-pretrained timm CNN runs on 3 adjacent slices as RGB and is **fine-tuned end-to-end**.
-   * A **global branch** (per-plane mean -> linear) feeds the output directly.
-   * A **local branch** mixes all slice tokens of all planes, then 12 label queries cross-attend to them.
-     `CFG.HEAD_TYPE` picks the mixer:
-     * `"more"` (**default, proposed**) -- **MV-MoRE**: one attention+FFN block, weight-shared and applied
-       up to `MOR_RECURSIONS` times with MoR expert-choice depth routing (Bae et al., 2025), whose FFN is a
-       top-k Mixture-of-Experts (`MOE_EXPERTS` experts, `MOE_TOPK` active per token; Shazeer 2017 / Switch,
-       Fedus 2022 / ST-MoE router z-loss, Zoph 2022), rewritten below as a **dense, static-shape** dispatch
-       for TPU (see "What changed for TPU").
-     * `"transformer"` -- the original 2-layer unshared transformer. This is the architecture that produced
-       the measured gold macro AUC 0.769 / OOF 0.834 result on GPU (see the repo README); set
-       `CFG.HEAD_TYPE = "transformer"` to reproduce it, or leave `"more"` to run the proposed extension
-       (its TPU numbers are **not yet measured** -- see "Targets vs. guarantees" below).
-   * Each branch has its own auxiliary loss (plus the MoE load-balance/z-loss when `HEAD_TYPE="more"`).
-4. **Training.** 5-fold CV on the report-labelled studies with AMP, a cosine schedule and soft BCE. The 58
-   expert-labelled studies are **held out** and used only for evaluation.
+3. **Model: enhanced logistic regression on frozen CNN features.** See "Model" below for the full design
+   and why it replaced an earlier fine-tuned 2.5-D hybrid CNN with an MV-MoRE/transformer head.
+4. **Fitting.** 5-fold CV on the report-labelled studies. The 58 expert-labelled studies are **held out**
+   and used only for evaluation.
 5. **Evaluation.** OOF macro AUC; expert-set macro AUC with a bootstrap CI; expert-set **accuracy** with
    leave-one-out thresholds; per-label table; timings.
 6. **Submission.** A fold ensemble writes `submission.csv`.
 
+## Model: why logistic regression, and what "enhanced" means here
+
+An earlier revision of this notebook fine-tuned a 2.5-D CNN end-to-end under an MV-MoRE/transformer head.
+This revision replaces that head with **logistic regression** -- deliberately simpler, and a better fit
+for what this dataset actually supports: only 58 studies carry expert labels, the rest are weak/noisy
+report-derived labels, and a model with hundreds of thousands of trainable parameters fit on that signal is
+exactly the regime where a much smaller, regularised linear classifier tends to generalise at least as
+well. The repo's own `results/summary.csv` bears this out: the existing plain logistic-regression baseline
+lands within a few points of gold macro AUC of every deep variant tried, including the fine-tuned hybrid
+CNN. "Enhanced" here means genuinely improving the *existing* classical baseline
+(`src/kneemor/baseline_lr.py`: per-plane mean-pooled features -> `StandardScaler` -> a single fixed-`C`
+`LogisticRegression` per label), not just renaming it:
+
+* **Frozen features, extracted once.** The ImageNet-pretrained CNN (`CFG.BACKBONE`) is *not* fine-tuned --
+  its weights never change, so unlike per-fold backprop training, features are extracted **once** for
+  every study and cached (`extract_features`, keyed by a cache tag), then reused across all 5 folds. This
+  is a large efficiency win, and it also removes an entire class of TPU complexity: a forward-only pass has
+  no backward-pass dynamic-shape or gradient-dtype concerns at all.
+* **Richer pooling.** Each study is pooled to one feature vector per plane as **mean *and* standard
+  deviation** of the per-(3-slice-window) embedding over the plane's slices (`2 x C` per plane, `3 x 2 x C`
+  total), instead of mean alone -- the spread across slices carries information the mean discards (e.g. a
+  focal finding visible on only a few slices raises the std without moving the mean much). A missing plane
+  still contributes exactly zero, as elsewhere in this notebook.
+* **Class-balanced, per-label regularisation search.** Each of the 12 labels gets its own
+  `LogisticRegressionCV` (`scikit-learn`) with `class_weight="balanced"` (several labels are rare) and an
+  L2 strength `C` chosen from `CFG.LR_C_GRID` by that label's **own inner cross-validation on the training
+  fold only** -- the search never sees the validation or gold studies, so nothing about picking `C` can
+  leak across the evaluation boundary. `StandardScaler` is still applied first, as in the baseline.
+* **Uncertain (0.5) labels excluded per label at fit time**, the same convention the evaluation already
+  uses, rather than forcing them to a side with a `>=0.5` threshold as the plain baseline implicitly did.
+* **Crash-safe fallback.** If a training fold has too few examples of one class for its label (common for
+  the rarest findings, especially in a small or `MAX_TRAIN_STUDIES`-limited run), the inner CV is shrunk to
+  fit, or -- if a fold has only one class for that label at all -- the label falls back to predicting that
+  fold's observed base rate rather than raising `scikit-learn`'s "needs samples of at least 2 classes" error.
+
 ## What changed for TPU (and why)
 
-PyTorch/XLA (the TPU backend) compiles a static computation graph -- it needs fixed tensor shapes -- and
-lowers only a subset of ops. A few things in the GPU version either don't compile or aren't supported
-there. Every change below is scoped to `DEVICE.type == "xla"`; running this same notebook on GPU/CPU is
-unaffected and numerically identical to the GPU notebook:
+The only TPU-relevant step left is `extract_features`' forward pass through the frozen encoder -- there is
+no training loop, no optimizer, no gradients; logistic regression itself always runs on `scikit-learn`/CPU.
+Every change below is scoped to `DEVICE.type == "xla"`; running on GPU/CPU is unaffected:
 
 * **Device selection.** `xm.xla_device()` is used when `torch_xla` is importable *and* a TPU actually
   answers a trivial op; otherwise it falls back to CUDA, then CPU. A missing/misconfigured accelerator
   degrades gracefully instead of crashing the whole run.
-* **Single TPU core.** A v3-8 board exposes 8 cores; this notebook trains on **one** of them. Scaling to
-  all 8 needs an `xmp.spawn`-based multi-process rewrite (per-core data sharding, gradient all-reduce,
-  rank-0-only logging/checkpointing/labeling) -- a natural follow-up, but out of scope here: it multiplies
-  the surface for hard-to-debug hangs, and this port's goal is a notebook that reliably finishes.
-* **Sparse MoE -> dense, static-shape MoE.** The MV-MoRE FFN originally dispatched each token to its top-k
-  experts with boolean-mask indexing (`out[mask] = ...`), whose output shape depends on the data (how many
-  tokens land on each expert). XLA either can't compile that or has to recompile the graph every step --
-  the documented reason real token-choice MoE-on-TPU implementations use fixed capacity. It's rewritten
-  below as a dense weighted sum over **all** experts, gated by a static-shape matrix (built with `scatter`,
-  not boolean masking) that is exactly zero for non-selected experts -- the same computation (same weights,
-  same output) without a data-dependent shape. `HEAD_TYPE="transformer"` doesn't use this module at all, so
-  its numbers are unaffected.
-* **bf16 autocast, no loss-scaler.** TPUs compute natively in bfloat16, which (unlike fp16) doesn't need
-  gradient scaling. Training uses `torch.autocast(device_type="xla", dtype=torch.bfloat16)` in place of the
-  fp16 CUDA autocast. If that ever raises on an older `torch_xla`, the notebook catches it once, prints a
-  warning, and continues in fp32 for the rest of the run instead of crashing.
-* **No spatial (grid_sample) augmentation on TPU.** `grid_sample`/`affine_grid` have inconsistent XLA
-  lowering and are reported to run far slower there than on GPU/CPU. On TPU the notebook keeps the
-  intensity augmentation (gamma/brightness/contrast jitter -- all elementwise) and skips the small random
-  affine warp; on GPU/CPU both apply, exactly as before.
-* **Checkpoints via `xm.save` / `map_location="cpu"`.** `xm.save` moves XLA tensors to CPU before pickling
-  (plain `torch.save` on live XLA tensors isn't a reliable round-trip); loading uses
-  `torch.load(..., map_location="cpu")` followed by `.to(DEVICE)`, rather than mapping straight to an XLA
-  device.
+* **bf16 autocast for the forward pass, with a self-heal.** `torch.autocast(device_type="xla",
+  dtype=torch.bfloat16)` speeds up feature extraction on TPU (bf16 is its native compute type). Since this
+  is inference-only, there's no gradient-scaling question at all; if autocast still raises on an older
+  `torch_xla`, the notebook catches it once, prints a warning, and continues in fp32.
+* **No checkpoint-serialisation concerns at all.** The fitted per-label classifiers are plain
+  `scikit-learn` objects (CPU `numpy` arrays under the hood) pickled with Python's `pickle` -- there's no
+  XLA tensor to move off-device first, unlike a `torch.save`/`xm.save` question for a trained `nn.Module`.
 * **`DataLoader(num_workers=0)` on TPU.** Forking worker processes after the XLA/PJRT runtime has opened
   its connection to the TPU in the parent process is a known source of hangs. Each `Dataset.__getitem__`
   here is just a memmap read (the expensive DICOM decoding already happened in `build_cache`, via a plain
@@ -117,22 +118,31 @@ the same idea used for asset discovery in other Kaggle inference notebooks; only
 (check both mount shapes, walk with bounded depth, skip the big series folders) is reused here, not any
 specific paths, checkpoints, or code from elsewhere.
 
-**Targets vs. guarantees.** As before: nothing here *guarantees* a particular macro AUC or accuracy; the
-notebook **measures and prints** what it achieves. The default MV-MoRE head's TPU numbers are **not yet
-measured** by this notebook -- only the GPU run with `HEAD_TYPE="transformer"` has a reported gold result.
-This port's job is to run the pipeline correctly and reproducibly on TPU, not to claim a new number.
+## What this model can honestly achieve (please read before trusting any number below)
 
-Two effects bound what any score can mean:
-* In the author's CPU study, rule labels agreed with the expert labels at about 0.735 AUC, which caps
-  models trained on them. The LLM labeler exists to raise that cap (GPU/CPU only, see above).
-* The expert set has only 58 studies (95% CI about +/-0.06 AUC).
+Nothing in this notebook *guarantees* a particular accuracy or AUC; it **measures and prints** what it
+achieves, and that measurement has a hard, dataset-set ceiling that no architecture change -- logistic
+regression included -- moves:
+
+* The rule labeler that produces most training labels agrees with the 58 expert-labelled studies at about
+  **0.735 AUC**. Models trained on its output cannot legitimately score better than that on labels drawn
+  from the same noisy process; the optional LLM labeler exists to try to raise this cap, not to guarantee it.
+* The expert ("gold") set used for the headline evaluation has only **58 studies** (a 95% bootstrap CI of
+  roughly +/-0.06 AUC on the macro score).
+* Across *every* model architecture measured so far in this repository -- the fine-tuned hybrid CNN, its
+  MV-MoRE and transformer heads, mean-pool MLP, ABMIL, gradient boosting, and the existing plain
+  logistic-regression baseline -- measured **gold macro accuracy has landed in the ~0.53-0.63 range and
+  per-label gold AUC in ~0.50-0.82** (see `results/summary.csv`, `results/per_label_auc.csv`). None of them
+  are close to 99%, and there is no honest way to get there on this benchmark: not by swapping in logistic
+  regression, and not by any other architecture change. A number that high on this task would mean the
+  evaluation leaked (e.g. the same studies used for both fitting and scoring, or a threshold tuned on the
+  set it's then measured on) -- this notebook's folds and the expert-set holdout are built specifically to
+  rule that out, and it reports whatever macro AUC/accuracy actually comes out the other end, not a target.
 
 **Two ways to run:**
-* `MODE="train"` (internet ON): trains, evaluates and writes the weights and a submission.
-* `MODE="infer"` (internet OFF): set `WEIGHTS_DIR` to a Kaggle dataset containing the saved `fold*.pt` and
-  `config.json`. TPU is generally not available in a no-internet code-competition rerun, so use `MODE="train"`
-  here on TPU to produce and validate the weights, and a GPU/CPU notebook with `MODE="infer"` for the actual
-  submission run."""))
+* `MODE="train"` (internet ON): fits, evaluates and writes the classifiers and a submission.
+* `MODE="infer"` (internet OFF): set `WEIGHTS_DIR` to a Kaggle dataset containing the saved `fold*.pkl` and
+  `config.json`."""))
 
 C.append(code(r"""# ============================== CONFIG ==============================
 import os, glob, json, math, time, random, warnings
@@ -149,27 +159,18 @@ class CFG:
     PLANES = ["Sagittal", "Coronal", "Axial"]
     SLICES = 16                    # slices per plane
     IMG = 224                      # in-plane size
-    # model
+    # frozen feature extractor (NOT fine-tuned -- see "Model" markdown above)
     BACKBONE = "tf_efficientnet_b0.ns_jft_in1k"         # alternatives: "convnext_nano.in12k_ft_in1k", "resnet34.a1_in1k"
     PRETRAINED = True              # needs internet in MODE="train"
-    D_MODEL = 256
-    HEAD_TYPE = "more"             # "more" (MV-MoRE: shared recursive block + dense top-k-gated MoE FFN, proposed)
-                                    # | "transformer" (original 2-layer unshared transformer, kept for comparison:
-                                    #   this is what the GPU notebook's metrics.json with HEAD_TYPE="transformer" measured)
-    MOR_RECURSIONS = 3             # MoR: max weight-shared recursions per token (expert-choice depth routing)
-    MOE_EXPERTS = 4                # MoE: experts in the shared block's FFN
-    MOE_TOPK = 2                   # MoE: experts each token is dispatched to (dense-gated for TPU; see model cell)
-    # training
+    FEAT_BATCH = 8                 # studies per forward pass through the frozen encoder
+    # classifier: enhanced logistic regression, one independent binary model per label
     FOLDS = 5
     TRAIN_FOLDS = [0, 1, 2, 3, 4]  # subset to save time, e.g. [0]
-    EPOCHS = 12
-    BATCH = 4                      # studies per step (each study = 3*SLICES images)
-    LR_BACKBONE = 2e-4
-    LR_HEAD = 1e-3
-    WD = 1e-2
-    AUX_W = 0.5                    # deep-supervision weight for each branch
+    LR_C_GRID = [0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0]   # inverse L2-strength candidates (LogisticRegressionCV)
+    LR_INNER_CV = 3                # folds for the leakage-safe C search, done within the training fold only
+    LR_MAX_ITER = 4000
     NUM_WORKERS = 4                # forced to 0 on TPU/XLA in the next cell -- see "What changed for TPU"
-    AMP = True
+    AMP = True                     # bf16/fp16 autocast for the frozen-encoder forward pass (no gradients -> always safe)
     # labels
     USE_LLM_LABELS = False         # True -> attach a Qwen2.5-Instruct model and set LLM_PATH (GPU/CPU only)
     LLM_PATH = "/kaggle/input/qwen2.5/transformers/3b-instruct/1"
@@ -182,16 +183,20 @@ if os.environ.get("KNEE_SMOKE") == "1":   # used only by the author's CPU smoke 
     CFG.SMOKE, CFG.DATA_DIR = True, os.environ["KNEE_DATA_DIR"]
     CFG.CACHE_DIR = CFG.OUT_DIR = os.environ["KNEE_OUT_DIR"]
     CFG.BACKBONE, CFG.PRETRAINED, CFG.SLICES, CFG.IMG = "resnet18", False, 6, 64
-    CFG.FOLDS, CFG.TRAIN_FOLDS, CFG.EPOCHS, CFG.BATCH, CFG.NUM_WORKERS, CFG.AMP = 2, [0, 1], 1, 2, 0, False
+    CFG.FOLDS, CFG.TRAIN_FOLDS, CFG.FEAT_BATCH, CFG.NUM_WORKERS = 2, [0, 1], 2, 0
+    CFG.LR_C_GRID, CFG.LR_INNER_CV = [0.1, 1.0], 2
     CFG.MODE = os.environ.get("KNEE_MODE", "train"); CFG.WEIGHTS_DIR = os.environ.get("KNEE_WEIGHTS", CFG.OUT_DIR)
 os.makedirs(CFG.CACHE_DIR, exist_ok=True); os.makedirs(CFG.OUT_DIR, exist_ok=True)
 print({k: v for k, v in vars(CFG).items() if not k.startswith("_")})"""))
 
 C.append(code(r"""import numpy as np, pandas as pd, torch, torch.nn as nn, torch.nn.functional as F
-import cv2, pydicom, timm
+import cv2, pydicom, timm, pickle
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
+from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 def seed_all(s):
     random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
@@ -479,264 +484,147 @@ if CFG.MODE == "train":
     VOL, MASK = build_cache("train", studies)
     print("train cache ready", elapsed())"""))
 
-C.append(md("## 4. Dataset & 2.5-D hybrid model"))
+C.append(md("## 4. Frozen CNN features & enhanced logistic regression"))
 C.append(code(r"""class KneeDS(torch.utils.data.Dataset):
-    def __init__(self, vol, mask, idx, y=None, train=False):
-        self.vol, self.mask, self.idx, self.y, self.train = vol, mask, idx, y, train
+    # Deterministic: the encoder is frozen (not fine-tuned), so every study's features only need
+    # computing once, the same way for train/val/gold/test -- no train-time augmentation flag needed.
+    def __init__(self, vol, mask, idx):
+        self.vol, self.mask, self.idx = vol, mask, idx
     def __len__(self): return len(self.idx)
     def __getitem__(self, i):
         j = self.idx[i]
         v = torch.from_numpy(np.array(self.vol[j]))                # P,S,H,W uint8
         m = torch.from_numpy(self.mask[j].copy())
-        if self.train:
-            if random.random() < 0.15 and m.sum() > 1:             # plane dropout (missing-sequence robustness)
-                k = random.choice(torch.where(m)[0].tolist()); m[k] = False; v[k] = 0
-        out = {"x": v, "m": m}
-        if self.y is not None: out["y"] = torch.from_numpy(self.y[i])
-        return out
+        return {"x": v, "m": m, "i": i}
 
 
-def gpu_augment(x):
-    # x: B,P,S,H,W float in [0,1]. Intensity + (GPU/CPU only) small affine; NO flips (would swap medial/
-    # lateral or ant/post). grid_sample/affine_grid have inconsistent XLA lowering and are reported far
-    # slower on TPU than on GPU/CPU (see "What changed for TPU"), so the spatial warp is skipped there and
-    # only the (elementwise, always-safe) intensity jitter applies.
-    B, P = x.shape[:2]
-    g = torch.empty(B, P, 1, 1, 1, device=x.device).uniform_(0.7, 1.4)
-    x = x.clamp(0, 1) ** g
-    x = x * torch.empty(B, P, 1, 1, 1, device=x.device).uniform_(0.85, 1.15) + torch.empty(B, P, 1, 1, 1, device=x.device).uniform_(-0.08, 0.08)
-    x = x.clamp(0, 1)
-    if DEVICE.type == "xla":
-        return x
-    th = torch.zeros(B * P, 2, 3, device=x.device)
-    sc = torch.empty(B * P, device=x.device).uniform_(0.9, 1.1); ang = torch.empty(B * P, device=x.device).uniform_(-0.15, 0.15)
-    th[:, 0, 0] = sc * torch.cos(ang); th[:, 0, 1] = -sc * torch.sin(ang); th[:, 1, 0] = sc * torch.sin(ang); th[:, 1, 1] = sc * torch.cos(ang)
-    th[:, :, 2] = torch.empty(B * P, 2, device=x.device).uniform_(-0.08, 0.08)
-    S, H, W = x.shape[2:]
-    grid = F.affine_grid(th, (B * P, S, H, W), align_corners=False)
-    x = F.grid_sample(x.reshape(B * P, S, H, W), grid, align_corners=False, padding_mode="zeros")
-    return x.reshape(B, P, S, H, W).clamp(0, 1)
+AMP_DTYPE = torch.bfloat16 if DEVICE.type == "xla" else torch.float16  # TPUs are native bf16
 
-class MoEFFN(nn.Module):
-    '''Top-k Mixture-of-Experts FFN (Shazeer 2017 / Switch, Fedus 2022 / ST-MoE, Zoph 2022), with a dense,
-    static-shape dispatch: every expert runs on every token, gated by a matrix built with `scatter` (not
-    boolean-mask indexing) that is exactly zero for non-selected experts. This computes the same thing as
-    sparse top-k gather-dispatch (same weights, same output) but with a shape that never depends on which
-    tokens route where -- boolean-mask gather has a data-dependent output shape, which XLA/TPU either can't
-    compile or has to recompile every step for (the documented reason real token-choice MoE-on-TPU
-    implementations use fixed capacity). The extra compute (all `n_experts` run, vs `top_k`) is minor here
-    since the MoE FFN is tiny next to the CNN backbone. Exposes aux_loss (load-balancing) and z_loss
-    (router-logit penalty, the documented cause of MoE training instability) for the caller to add to the
-    task loss. Ported from src/kneemor/models.py MoEFFN so the notebook stays self-contained on Kaggle.'''
-    def __init__(self, d, ffn, drop, n_experts=4, top_k=2):
-        super().__init__()
-        assert 1 <= top_k <= n_experts
-        self.n_experts, self.top_k = n_experts, top_k
-        self.router = nn.Linear(d, n_experts)
-        self.experts = nn.ModuleList([nn.Sequential(nn.Linear(d, ffn), nn.GELU(), nn.Dropout(drop),
-                                                     nn.Linear(ffn, d)) for _ in range(n_experts)])
-        self.aux_loss = torch.zeros(()); self.z_loss = torch.zeros(())
-    def forward(self, x):
-        shape = x.shape; flat = x.reshape(-1, shape[-1])
-        logits = self.router(flat); probs = logits.softmax(-1)
-        topv, topi = probs.topk(self.top_k, dim=-1)
-        topv = topv / topv.sum(-1, keepdim=True).clamp_min(1e-9)
-        gate = torch.zeros(flat.shape[0], self.n_experts, dtype=flat.dtype, device=flat.device)
-        gate = gate.scatter(1, topi, topv.to(flat.dtype))            # static-shape gate, zero off top-k
-        out = torch.zeros_like(flat)
-        for e, expert in enumerate(self.experts):
-            out = out + gate[:, e:e + 1] * expert(flat)
-        importance = probs.mean(0)
-        frac = (gate > 0).float().mean(0)
-        self.aux_loss = self.n_experts * (importance * frac).sum()          # switch load-balance loss
-        self.z_loss = (torch.logsumexp(logits, dim=-1) ** 2).mean()         # ST-MoE router z-loss
-        return out.reshape(shape)
+MEAN_RGB = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(DEVICE)
+STD_RGB = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(DEVICE)
 
-class MoREBlock(nn.Module):
-    '''Pre-norm attention + MoE-FFN block; one instance is reused every recursion (MoR weight sharing).'''
-    def __init__(self, d, heads, ffn, drop, n_experts, top_k):
-        super().__init__()
-        self.n1, self.n2 = nn.LayerNorm(d), nn.LayerNorm(d)
-        self.attn = nn.MultiheadAttention(d, heads, dropout=drop, batch_first=True)
-        self.ffn = MoEFFN(d, ffn, drop, n_experts, top_k)
-        self.drop = nn.Dropout(drop)
-    def residual(self, h, pad):
-        x = self.n1(h)
-        a = self.attn(x, x, x, key_padding_mask=pad, need_weights=False)[0]
-        u = h + self.drop(a)
-        y = self.ffn(self.n2(u))
-        return u + self.drop(y) - h
+def make_encoder():
+    # Frozen: an ImageNet-pretrained CNN used purely as a feature extractor. Nothing here is trained --
+    # see the "Model" markdown above for why a fine-tuned CNN was replaced by this + logistic regression.
+    enc = timm.create_model(CFG.BACKBONE, pretrained=CFG.PRETRAINED, num_classes=0, in_chans=3).to(DEVICE).eval()
+    for p in enc.parameters(): p.requires_grad_(False)
+    return enc
 
-class MoRELocal(nn.Module):
-    '''MV-MoRE local mixer: one shared MoREBlock applied R times with MoR expert-choice depth
-    routing (Bae et al., 2025) -- replaces the plain unshared 2-layer transformer used for
-    HEAD_TYPE="transformer". Adds per-token Mixture-of-Experts capacity at near-zero extra FLOPs
-    relative to the CNN backbone (the backbone is 3-4 orders of magnitude larger in compute; see
-    README "Proposed extension: MV-MoRE"). All indexing here (topk with a static k, gather, scatter_add) is
-    already static-shape and XLA-safe; only MoEFFN's internal dispatch needed rewriting for TPU (see above).
-    aux_loss (load-balance + router z-loss, averaged over the recursion steps run) is exposed for the
-    training loop to add to the task loss.'''
-    def __init__(self, d, heads=4, ffn_mult=2, recursions=3, capacity=(1.0, 0.5, 0.25), n_experts=4, top_k=2, drop=0.1):
-        super().__init__()
-        self.block = MoREBlock(d, heads, ffn_mult * d, drop, n_experts, top_k)
-        self.R, self.capacity = recursions, list(capacity)
-        self.routers = nn.ModuleList([nn.Linear(d, 1) for _ in range(recursions)])
-        self.aux_loss = torch.zeros(())
-    def forward(self, h, pad):
-        B, T, d = h.shape
-        active = ~pad
-        moe_losses = []
-        for r in range(self.R):
-            score = self.routers[r](h).squeeze(-1)
-            k = max(1, min(T, math.ceil(self.capacity[r] * T)))
-            masked = score.masked_fill(~active, float("-inf"))
-            idx = masked.topk(k, dim=1).indices
-            sel_valid = torch.gather(active, 1, idx)
-            hs = torch.gather(h, 1, idx[..., None].expand(-1, -1, d))
-            g = torch.sigmoid(torch.gather(score, 1, idx)).unsqueeze(-1)
-            upd = self.block.residual(hs, ~sel_valid) * g * sel_valid.unsqueeze(-1).float()
-            moe_losses.append(0.01 * self.block.ffn.aux_loss + 0.001 * self.block.ffn.z_loss)
-            h = h.scatter_add(1, idx[..., None].expand(-1, -1, d), upd)
-            active = torch.zeros_like(active).scatter(1, idx, sel_valid)
-        self.aux_loss = torch.stack(moe_losses).mean()
-        return h
-
-class Knee25DHybrid(nn.Module):
-    '''2.5-D CNN (3 adjacent slices -> RGB) + global branch + local mixer + label-query branch.
-    CFG.HEAD_TYPE picks the local mixer: "more" (MV-MoRE, proposed) or "transformer" (original
-    baseline, kept so the two are a true apples-to-apples ablation on identical tokens/training).'''
-    def __init__(self, backbone, pretrained, P, S, d=256, n=12, head_type="more",
-                 recursions=3, n_experts=4, top_k=2):
-        super().__init__()
-        self.enc = timm.create_model(backbone, pretrained=pretrained, num_classes=0, in_chans=3)
-        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
-        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1), persistent=False)
-        C = self.enc.num_features
-        self.glob = nn.Sequential(nn.LayerNorm(P * C), nn.Dropout(0.2), nn.Linear(P * C, n))
-        self.proj = nn.Sequential(nn.LayerNorm(C), nn.Linear(C, d))
-        self.plane = nn.Parameter(torch.zeros(P, 1, d)); self.pos = nn.Parameter(torch.zeros(P, S, d))
-        nn.init.trunc_normal_(self.plane, std=0.02); nn.init.trunc_normal_(self.pos, std=0.02)
-        self.head_type = head_type
-        if head_type == "more":
-            self.mix = MoRELocal(d, heads=4, ffn_mult=2, recursions=recursions, n_experts=n_experts, top_k=top_k, drop=0.1)
-        else:
-            layer = nn.TransformerEncoderLayer(d, 4, 2 * d, 0.1, batch_first=True, norm_first=True)
-            self.mix = nn.TransformerEncoder(layer, 2)
-        self.q = nn.Parameter(torch.randn(n, d) * 0.02)
-        self.xattn = nn.MultiheadAttention(d, 4, dropout=0.1, batch_first=True)
-        self.nq, self.nk = nn.LayerNorm(d), nn.LayerNorm(d)
-        self.w = nn.Parameter(torch.randn(n, d) * 0.02); self.b = nn.Parameter(torch.zeros(n))
-    def forward(self, x, m):                        # x: B,P,S,H,W in [0,1]; m: B,P bool
-        B, P, S, H, W = x.shape
-        xp = torch.cat([x[:, :, :1], x, x[:, :, -1:]], 2)             # replicate-pad slices
-        rgb = torch.stack([xp[:, :, i:i + S] for i in range(3)], 3)  # B,P,S,3,H,W
-        f = self.enc((rgb.reshape(-1, 3, H, W) - self.mean) / self.std)      # B*P*S, C
-        f = f.float().view(B, P, S, -1)
-        mf = m[..., None].float()
-        zg = self.glob((f.mean(2) * mf).flatten(1))
-        t = (self.proj(f) + self.plane + self.pos).reshape(B, P * S, -1)
-        pad = (~m)[:, :, None].expand(B, P, S).reshape(B, P * S)
-        if self.head_type == "more":
-            t = self.mix(t, pad)
-            moe_aux = self.mix.aux_loss.expand(B)          # [B]: DataParallel-safe (concatenable across GPUs)
-        else:
-            t = self.mix(t, src_key_padding_mask=pad)
-            moe_aux = torch.zeros(B, device=x.device)
-        q = self.nq(self.q).unsqueeze(0).expand(B, -1, -1)
-        a, _ = self.xattn(q, self.nk(t), self.nk(t), key_padding_mask=pad)
-        zl = ((q + a) * self.w).sum(-1) + self.b
-        return 0.5 * (zg + zl), zg, zl, moe_aux
-
-def make_model(pretrained):
-    return Knee25DHybrid(CFG.BACKBONE, pretrained, len(CFG.PLANES), CFG.SLICES, CFG.D_MODEL,
-                         head_type=CFG.HEAD_TYPE, recursions=CFG.MOR_RECURSIONS,
-                         n_experts=CFG.MOE_EXPERTS, top_k=CFG.MOE_TOPK)
-
-_m = make_model(False); print(f"params: {sum(p.numel() for p in _m.parameters()) / 1e6:.2f} M | head_type: {CFG.HEAD_TYPE}"); del _m"""))
-
-C.append(md("## 5. 5-fold training (expert-labelled studies held out)"))
-C.append(code(r"""AMP_DTYPE = torch.bfloat16 if DEVICE.type == "xla" else torch.float16  # TPUs are native bf16; no fp16 loss-scale headaches
-
-def run_epoch(model, loader, opt=None, sched=None, scaler=None):
-    train = opt is not None
-    model.train(train); preds, tot, n = [], 0.0, 0
-    for b in loader:
-        x = b["x"].to(DEVICE, non_blocking=True).float().div_(255); m = b["m"].to(DEVICE)
-        if train: x = gpu_augment(x)
-        def fwd():
-            with torch.set_grad_enabled(train):
-                return model(x, m)
-        amp_on = CFG.AMP and DEVICE.type in ("cuda", "xla")
+@torch.no_grad()
+def extract_features(enc, vol, mask, tag):
+    '''Per study, per plane: mean AND std (over the plane's slices) of the 3-slice-window embedding --
+    richer than mean alone (see "Model" markdown). Cached to CFG.CACHE_DIR by `tag` since the encoder
+    never changes across folds -- unlike backprop training, there is nothing fold-specific to recompute.'''
+    path = f"{CFG.CACHE_DIR}/{tag}_feat.npy"
+    if os.path.exists(path):
+        return np.load(path)
+    P, S, C = len(CFG.PLANES), CFG.SLICES, enc.num_features
+    feats = np.zeros((len(vol), P, 2 * C), np.float32)
+    dl = torch.utils.data.DataLoader(KneeDS(vol, mask, np.arange(len(vol))), batch_size=CFG.FEAT_BATCH,
+                                     shuffle=False, num_workers=CFG.NUM_WORKERS, pin_memory=(DEVICE.type == "cuda"))
+    amp_on = CFG.AMP and DEVICE.type in ("cuda", "xla")
+    t = time.time()
+    for b in dl:
+        x = b["x"].to(DEVICE, non_blocking=True).float().div_(255); m = b["m"].to(DEVICE); idx = b["i"].numpy()
+        B, P_, S_, H, W = x.shape
+        xp = torch.cat([x[:, :, :1], x, x[:, :, -1:]], 2)                     # replicate-pad slices
+        rgb = torch.stack([xp[:, :, i2:i2 + S_] for i2 in range(3)], 3)       # B,P,S,3,H,W
+        rgb = (rgb.reshape(-1, 3, H, W) - MEAN_RGB) / STD_RGB
+        def fwd(): return enc(rgb).float().view(B, P_, S_, -1)
         if amp_on:
             try:
                 with torch.autocast(device_type=DEVICE.type, dtype=AMP_DTYPE, enabled=True):
-                    z, zg, zl, moe_aux = fwd()
+                    f = fwd()
             except Exception as e:
                 # Self-heal instead of crashing the run: an older torch_xla may not register "xla" as an
                 # autocast device_type. Disable AMP for the rest of the run and redo this batch in fp32.
-                print(f"autocast unavailable on {DEVICE.type} ({e!r}); disabling AMP for the rest of the run.")
-                CFG.AMP = False
-                z, zg, zl, moe_aux = fwd()
+                print(f"autocast unavailable on {DEVICE.type} ({e!r}); extracting features in fp32 instead.")
+                CFG.AMP, amp_on = False, False
+                f = fwd()
         else:
-            z, zg, zl, moe_aux = fwd()
-        if train:
-            y = b["y"].to(DEVICE)
-            loss = F.binary_cross_entropy_with_logits(z.float(), y) + CFG.AUX_W * (
-                F.binary_cross_entropy_with_logits(zg.float(), y) + F.binary_cross_entropy_with_logits(zl.float(), y)
-            ) + moe_aux.float().mean()          # MoE load-balance + router z-loss (no-op, 0, for HEAD_TYPE="transformer")
-            opt.zero_grad(set_to_none=True)
-            scaler.scale(loss).backward(); scaler.unscale_(opt)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
-            scaler.step(opt); scaler.update(); sched.step()
-            if DEVICE.type == "xla": xm.mark_step()     # execute the queued graph and advance the TPU
-            tot += loss.item() * len(y); n += len(y)
-        else:
-            preds.append(torch.sigmoid(z.float()).cpu().numpy())
-    return tot / max(n, 1) if train else np.concatenate(preds)
+            f = fwd()
+        fm = f * m[..., None].float()[..., None]                              # zero out missing planes
+        pooled = torch.cat([fm.mean(2), fm.std(2)], -1)                       # B,P,2C
+        feats[idx] = pooled.cpu().numpy()
+        if DEVICE.type == "xla": xm.mark_step()
+    feats = feats.reshape(len(vol), -1)
+    np.save(path, feats)
+    print(f"  features cached: {tag} {feats.shape} in {time.time() - t:.0f}s")
+    return feats
 
-def loader(idx, y=None, train=False):
-    ds = KneeDS(VOL, MASK, idx, y, train)
-    return torch.utils.data.DataLoader(ds, batch_size=CFG.BATCH if train else CFG.BATCH * 2, shuffle=train,
-                                       num_workers=CFG.NUM_WORKERS, pin_memory=(DEVICE.type == "cuda"), drop_last=train)
+def predict_proba_pos(clf, X):
+    return clf.predict_proba(X)[:, 1]
 
-def save_state(state_dict, path):
-    (xm.save if DEVICE.type == "xla" else torch.save)(state_dict, path)   # xm.save moves XLA tensors to CPU first
+class ConstantProba:
+    '''Fallback for a training fold with only one class present for a label (too rare to fit a real
+    classifier on): predicts that fold's observed base rate for every study, rather than letting
+    sklearn raise "This solver needs samples of at least 2 classes" and crash the whole run.'''
+    def __init__(self, p): self.p = float(p)
+    def predict_proba(self, X):
+        return np.tile([1 - self.p, self.p], (len(X), 1))
 
-if CFG.MODE == "train":
+def fit_label_classifier(Xtr, ytr):
+    '''Enhanced logistic regression for one label: StandardScaler -> class-balanced LogisticRegressionCV,
+    with its L2 strength chosen from CFG.LR_C_GRID by cross-validation *within this training fold only*
+    (never touching validation/gold -- see "Model" markdown). Falls back to a fixed-C LogisticRegression
+    if the inner CV can't run (too few examples of one class for the requested number of folds), and to
+    ConstantProba if the fold has only one class for this label at all.'''
+    ytr = np.asarray(ytr)
+    if len(np.unique(ytr)) < 2:
+        return ConstantProba(ytr.mean())
+    n_pos, n_neg = int(ytr.sum()), int(len(ytr) - ytr.sum())
+    cv = max(2, min(CFG.LR_INNER_CV, n_pos, n_neg))
+    try:
+        clf = make_pipeline(StandardScaler(), LogisticRegressionCV(
+            Cs=CFG.LR_C_GRID, cv=cv, class_weight="balanced", max_iter=CFG.LR_MAX_ITER, scoring="roc_auc"))
+        clf.fit(Xtr, ytr)
+        return clf
+    except Exception as e:
+        print(f"LogisticRegressionCV failed ({e!r}); falling back to a fixed-C logistic regression.")
+        clf = make_pipeline(StandardScaler(), LogisticRegression(C=0.1, class_weight="balanced", max_iter=CFG.LR_MAX_ITER))
+        clf.fit(Xtr, ytr)
+        return clf
+
+def save_models(models, path):
+    with open(path, "wb") as f: pickle.dump(models, f)
+
+def load_models(path):
+    with open(path, "rb") as f: return pickle.load(f)
+
+_e = make_encoder(); print(f"frozen encoder params: {sum(p.numel() for p in _e.parameters()) / 1e6:.2f} M (not trained -- see Model markdown)"); del _e"""))
+
+C.append(md("## 5. 5-fold logistic-regression fitting (expert-labelled studies held out)"))
+C.append(code(r"""if CFG.MODE == "train":
     pool = np.where(~gold_mask)[0]; gold = np.where(gold_mask)[0]
     Yp = SOFT[pool]; Yg = train.loc[gold_mask, LABELS].values.astype(int)
     strat = np.clip((Yp >= 0.5).sum(1), 0, 5) * 2 + (Yp[:, 0] >= 0.5)
     folds = np.zeros(len(pool), int)
     for f, (_, te) in enumerate(StratifiedKFold(CFG.FOLDS, shuffle=True, random_state=CFG.SEED).split(pool, strat)):
         folds[te] = f
+
+    enc = make_encoder()
+    FEAT = extract_features(enc, VOL, MASK, f"train_{CFG.SLICES}x{CFG.IMG}_{len(VOL)}")
+    del enc
+    if DEVICE.type == "cuda": torch.cuda.empty_cache()
+    print("features ready", FEAT.shape, elapsed())
+    Fp, Fg = FEAT[pool], FEAT[gold]
+
     oof = np.full(Yp.shape, np.nan, np.float32); gold_preds = []; fold_times = []
     for f in CFG.TRAIN_FOLDS:
         t = time.time(); seed_all(CFG.SEED + f)
-        tr, va = pool[folds != f], pool[folds == f]
-        model = make_model(CFG.PRETRAINED).to(DEVICE)
-        if N_GPU > 1: model = nn.DataParallel(model)
-        core = model.module if hasattr(model, "module") else model
-        enc_p = list(core.enc.parameters()); enc_ids = {id(p) for p in enc_p}
-        head_p = [p for p in core.parameters() if id(p) not in enc_ids]
-        opt = torch.optim.AdamW([{"params": enc_p, "lr": CFG.LR_BACKBONE}, {"params": head_p, "lr": CFG.LR_HEAD}],
-                                weight_decay=CFG.WD)
-        dl = loader(tr, Yp[folds != f], train=True)
-        sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[CFG.LR_BACKBONE, CFG.LR_HEAD],
-                                                    total_steps=CFG.EPOCHS * len(dl), pct_start=0.1)
-        scaler = torch.amp.GradScaler(enabled=CFG.AMP and DEVICE.type == "cuda")   # bf16/XLA needs no loss scaling
-        for ep in range(CFG.EPOCHS):
-            loss = run_epoch(model, dl, opt, sched, scaler)
-            msg = f"fold {f} ep {ep + 1}/{CFG.EPOCHS} loss {loss:.4f}"
-            if ep == CFG.EPOCHS - 1 or (ep + 1) % 4 == 0:
-                pv = run_epoch(model, loader(va))
-                yv = Yp[folds == f]; msg += f" | val macroAUC(report labels) {macro_auc((yv >= 1).astype(int), pv, yv != 0.5):.4f}"
-            print(msg, elapsed())
-        oof[folds == f] = run_epoch(model, loader(va))
-        gold_preds.append(run_epoch(model, loader(gold)))
-        save_state(core.state_dict(), f"{CFG.OUT_DIR}/fold{f}.pt")
+        tr, va = folds != f, folds == f
+        gp = np.zeros(Yg.shape, np.float32); models = {}
+        for k, lab in enumerate(LABELS):
+            mtr = Yp[tr, k] != 0.5                                     # exclude uncertain labels from fitting
+            ytr = (Yp[tr, k][mtr] >= 1).astype(int)
+            clf = fit_label_classifier(Fp[tr][mtr], ytr)
+            oof[va, k] = predict_proba_pos(clf, Fp[va])
+            gp[:, k] = predict_proba_pos(clf, Fg)
+            models[lab] = clf
+        gold_preds.append(gp)
+        save_models(models, f"{CFG.OUT_DIR}/fold{f}.pkl")
         fold_times.append(time.time() - t)
-        print(f"== fold {f}: gold macroAUC {macro_auc(Yg, gold_preds[-1]):.4f}")
-        del model, opt; torch.cuda.empty_cache()
+        print(f"fold {f}: gold macroAUC {macro_auc(Yg, gp):.4f}", elapsed())
     json.dump({k: v for k, v in vars(CFG).items() if not k.startswith("_") and isinstance(v, (int, float, str, list, bool, type(None)))},
               open(f"{CFG.OUT_DIR}/config.json", "w"), indent=1)"""))
 
@@ -783,26 +671,29 @@ C.append(code(r"""t_inf = time.time()
 test = pd.read_csv(f"{DATA}/test.csv")
 wdir = CFG.OUT_DIR if CFG.MODE == "train" else CFG.WEIGHTS_DIR
 if CFG.MODE == "infer" and not os.path.exists(f"{wdir}/config.json"):
-    found = find_kaggle_path(os.path.basename(wdir.rstrip("/")), "fold*.pt")   # WEIGHTS_DIR didn't exist as configured
+    found = find_kaggle_path(os.path.basename(wdir.rstrip("/")), "fold*.pkl")   # WEIGHTS_DIR didn't exist as configured
     if found: wdir = found; print("WEIGHTS_DIR not found as configured; auto-detected:", wdir)
 if CFG.MODE == "infer" and os.path.exists(f"{wdir}/config.json"):
     for k, v in json.load(open(f"{wdir}/config.json")).items():
-        if k in ("BACKBONE", "SLICES", "IMG", "D_MODEL", "PLANES"): setattr(CFG, k, v)
+        if k in ("BACKBONE", "SLICES", "IMG", "PLANES"): setattr(CFG, k, v)
 TVOL, TMASK = build_cache("test", test.StudyInstanceUID.tolist())
-paths = sorted(glob.glob(f"{wdir}/fold*.pt")); assert paths, f"no fold*.pt in {wdir}"
-VOL, MASK = TVOL, TMASK
+paths = sorted(glob.glob(f"{wdir}/fold*.pkl")); assert paths, f"no fold*.pkl in {wdir}"
+enc = make_encoder()
+Ftest = extract_features(enc, TVOL, TMASK, f"test_{CFG.SLICES}x{CFG.IMG}_{len(TVOL)}")
+del enc
+if DEVICE.type == "cuda": torch.cuda.empty_cache()
 preds = []
 for p in paths:
-    model = make_model(False)
-    model.load_state_dict(torch.load(p, map_location="cpu"))   # always land on CPU first, then move to DEVICE
-    model = model.to(DEVICE); model.eval()
-    preds.append(run_epoch(model, loader(np.arange(len(test)))))
-    del model
+    models = load_models(p)
+    pf = np.zeros((len(test), len(LABELS)), np.float32)
+    for k, lab in enumerate(LABELS):
+        pf[:, k] = predict_proba_pos(models[lab], Ftest)
+    preds.append(pf)
 P = np.mean(preds, 0)
 sub = pd.DataFrame(P, columns=LABELS); sub.insert(0, "StudyInstanceUID", test.StudyInstanceUID.values)
 ss = pd.read_csv(f"{DATA}/sample_submission.csv"); sub = sub[ss.columns]
 sub.to_csv("submission.csv", index=False)
-print(f"submission.csv: {sub.shape} | {len(paths)} fold models")
+print(f"submission.csv: {sub.shape} | {len(paths)} fold models | {time.time() - t_inf:.0f}s")
 sub.head()"""))
 
 nb = nbf.v4.new_notebook(cells=C)

@@ -11,14 +11,18 @@
 > both train and infer modes; no GPU scores have been measured yet.
 
 > **Kaggle TPU notebook (V2):** [`notebooks/rsna_knee_kaggle_tpu_v2.ipynb`](notebooks/rsna_knee_kaggle_tpu_v2.ipynb)
-> is the TPU v3-8 port of the notebook above -- same pipeline, same model, same evaluation, adapted to run on a
-> single PyTorch/XLA TPU core (dense/static-shape MoE dispatch instead of boolean-mask gather, bf16 autocast
-> with a fp32 self-heal fallback, no `grid_sample` spatial augmentation on TPU, `xm.save`/`map_location="cpu"`
-> checkpointing, `NUM_WORKERS=0`, LLM labeler disabled -- all explained in the notebook's own "What changed for
-> TPU" section). Select **Settings -> Accelerator -> TPU VM v3-8** before running. Rebuild it with
+> runs the same labeling/preprocessing pipeline as the GPU notebook on a single PyTorch/XLA TPU core, but
+> with the model replaced: an **enhanced logistic regression** on frozen, pretrained-CNN features (mean
+> *and* std pooled per plane, `StandardScaler`, per-label class-balanced `LogisticRegressionCV` with a
+> leakage-safe inner-CV search over `C`) in place of the earlier fine-tuned 2.5-D hybrid CNN with an
+> MV-MoRE/transformer head. A frozen-feature forward pass has no backward-pass dynamic-shape concerns at
+> all, so the TPU story is now just: device selection with GPU/CPU fallback, bf16 autocast with an fp32
+> self-heal, and `NUM_WORKERS=0` -- all explained in the notebook's own "Model" and "What changed for TPU"
+> sections, including why 99% accuracy is not an honest target on this benchmark regardless of model choice.
+> Select **Settings -> Accelerator -> TPU VM v3-8** before running. Rebuild it with
 > `python notebooks/build_kaggle_notebook_tpu_v2.py`. It was smoke-tested end-to-end (train and infer modes,
-> both `HEAD_TYPE` variants) on CPU with synthetic DICOM data; no TPU scores have been measured yet, since TPU
-> hardware isn't available in this development environment.
+> including the single-class and extreme-skew classifier fallbacks) on CPU with synthetic DICOM data; no TPU
+> scores have been measured yet, since TPU hardware isn't available in this development environment.
 
 This is a reproducible, leakage-safe pipeline for the Kaggle competition
 [RSNA Knee Abnormality Detection](https://www.kaggle.com/competitions/rsna-knee-abnormality-detection).
