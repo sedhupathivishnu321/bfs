@@ -525,3 +525,19 @@ The environment was a CPU-only container with 4 vCPUs.
 | **Total** | **≈ 11 h** |
 
 A single GPU would cut this to well under an hour.
+
+## 11. Kaggle notebook v2 (rebuilt; not yet run on real data)
+
+[`notebooks/rsna_knee_kaggle_v2.ipynb`](notebooks/rsna_knee_kaggle_v2.ipynb), built by
+[`notebooks/build_kaggle_notebook_v2.py`](notebooks/build_kaggle_notebook_v2.py). It removes the fixed limits of
+the v1 notebook (one series per plane, 16 slices, 224 px, one small backbone, fixed epochs) and adopts the
+features of the public notebooks listed in [`docs/notebook_analysis.md`](docs/notebook_analysis.md): five series
+slots with 96 slices, physical `CROP_MM` crops, 3-slice windows with slot and position embeddings, per-finding
+attention, EMA weights, anatomical mirror TTA, several backbone arms fused on **out-of-fold** predictions (not on
+the expert set), a wall-clock budget, per-study fallbacks and checkpoint hashes. The v1 notebook is unchanged.
+
+**Status: measured only on synthetic DICOMs (CPU).** `scripts/make_synthetic_rsna.py` generates a tiny fake
+dataset; train, infer and `INCLUDE_GOLD` modes run end to end, the infer run reproduces the train-run submission
+exactly, and unit checks cover the window table, mirror and augmentation. Accuracy on the real data is unmeasured,
+and the run-time presets are estimates. Label quality (rule labels reach 0.735 AUC against the expert set) still
+limits what any image model can reach; use `USE_LLM_LABELS=True` for the largest expected gain.
