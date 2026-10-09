@@ -111,12 +111,16 @@ class CFG:
     LLM_BATCH = 8
     # ---- output ----
     OUTPUT = "prob"                # "prob" | "rank" (per-column percentile rank of the ensemble)
+    RESUME_DIR = None              # a previous session's output directory (attach it as a dataset) to continue training
     SMOKE = False
     MAX_TRAIN_STUDIES = None       # e.g. 300 for a quick trial
 
 PRESETS = {   # ESTIMATES for a Kaggle T4x2, not measurements
     "fast":     dict(IMG=224, TRAIN_WINDOWS=24, EPOCHS=4, BACKBONES=["convnext_nano.in12k_ft_in1k"], D_MODEL=256),
     "balanced": dict(),
+    "ultra":    dict(IMG=384, TRAIN_WINDOWS=48, EPOCHS=8, GRAD_CKPT=True, D_MODEL=512, TF_DEPTH=3, EMA=0.999, LR_BACKBONE=8e-5,
+                     USE_LLM_LABELS=True, TIME_BUDGET_H=8.6,
+                     BACKBONES=["coatnet_rmlp_2_rw_384.sw_in12k_ft_in1k", "convnext_small.in12k_ft_in1k"]),
     "max":      dict(IMG=320, TRAIN_WINDOWS=48, EPOCHS=8, GRAD_CKPT=True,
                      BACKBONES=["convnext_tiny.in12k_ft_in1k", "tf_efficientnet_b3.ns_jft_in1k"]),
 }
@@ -231,8 +235,12 @@ def llm_label(reports):
 
 if CFG.MODE == "train":
     candidates = {"rules": rule}
-    if CFG.USE_LLM_LABELS:
-        llm = llm_label(train.Report.tolist())
+    if CFG.USE_LLM_LABELS and not os.path.isdir(CFG.LLM_PATH):
+        print(f"!! USE_LLM_LABELS=True but no model at {CFG.LLM_PATH}: attach a Qwen2.5-Instruct model; continuing with rule labels")
+    elif CFG.USE_LLM_LABELS:
+        cached = [q for q in (f"{CFG.RESUME_DIR}/llm_labels.npy" if CFG.RESUME_DIR else None, f"{CFG.OUT_DIR}/llm_labels.npy") if q and os.path.exists(q)]
+        if cached: llm = np.load(cached[0]); print("LLM labels loaded from", cached[0])
+        else: llm = llm_label(train.Report.tolist()); np.save(f"{CFG.OUT_DIR}/llm_labels.npy", llm)
         ok = ~np.isnan(llm).any(1); print(f"LLM parsed {ok.mean():.1%} of reports")
         llm = np.where(np.isnan(llm), rule, np.clip(llm, 0, 1))
         candidates["llm"] = llm
@@ -464,6 +472,7 @@ class Knee25DMIL(nn.Module):
     def __init__(self, backbone, pretrained, d=384, n=12, depth=2, drop=0.2, drop_path=0.1, grad_ckpt=False):
         super().__init__()
         kw = {"drop_path_rate": drop_path} if drop_path else {}
+        if backbone.startswith(("coatnet", "coat_", "maxvit", "maxxvit", "vit_", "eva", "beit")): kw["img_size"] = CFG.IMG
         self.enc = timm.create_model(backbone, pretrained=pretrained, num_classes=0, in_chans=3, **kw)
         if grad_ckpt and hasattr(self.enc, "set_grad_checkpointing"): self.enc.set_grad_checkpointing(True)
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
@@ -574,17 +583,30 @@ if CFG.MODE == "train":
     folds = np.zeros(len(pool), int)
     for f, (_, te) in enumerate(StratifiedKFold(CFG.FOLDS, shuffle=True, random_state=CFG.SEED).split(pool, strat)):
         folds[te] = f
-    ARMS = {}                                                  # arm -> dict(oof, gold, files)
-    fold_times = []
-    stop = False
-    for arm_i, backbone in enumerate(CFG.BACKBONES):
-        arm = f"a{arm_i}"; ARMS[arm] = dict(backbone=backbone, oof=np.full(Ypool.shape, np.nan, np.float32), gold=[], files=[])
-        for f in CFG.TRAIN_FOLDS:
-            left = CFG.TIME_BUDGET_H * 3600 - (time.time() - T0) - CFG.INFER_RESERVE_MIN * 60
-            if fold_times and left < 1.15 * np.mean(fold_times):
-                print(f"!! time budget: {left / 60:.0f} min left < one fold ({np.mean(fold_times) / 60:.0f} min); stopping training"); stop = True; break
-            t = time.time(); seed_all(CFG.SEED + f + 100 * arm_i)
-            tr, va = pool[folds != f], pool[folds == f]
+    ARMS = {f"a{i}": dict(backbone=b, oof=np.full(Ypool.shape, np.nan, np.float32), gold=[], files=[]) for i, b in enumerate(CFG.BACKBONES)}
+    RES = CFG.RESUME_DIR if CFG.RESUME_DIR and os.path.isdir(CFG.RESUME_DIR) else None
+    fold_sig = hashlib.md5(folds.tobytes() + np.asarray(pool).tobytes()).hexdigest()
+    fold_times, stop = [], False
+    for f in CFG.TRAIN_FOLDS:                                   # fold-major: every finished fold contains all arms
+        left = CFG.TIME_BUDGET_H * 3600 - (time.time() - T0) - CFG.INFER_RESERVE_MIN * 60
+        pending = any(not (RES and os.path.exists(f"{RES}/a{i}_fold{f}.pt")) for i in range(len(CFG.BACKBONES)))
+        if pending and fold_times and left < 1.15 * np.mean(fold_times):
+            print(f"!! time budget: {left / 60:.0f} min left < one fold ({np.mean(fold_times) / 60:.0f} min); stopping. "
+                  f"Run again with RESUME_DIR set to this output to train the remaining folds."); break
+        t_fold, trained = time.time(), False
+        for arm_i, backbone in enumerate(CFG.BACKBONES):
+            arm = f"a{arm_i}"; st = f"{arm}_fold{f}"; va = pool[folds == f]
+            if RES and os.path.exists(f"{RES}/{st}.pt") and os.path.exists(f"{RES}/{st}_state.npz"):
+                z = np.load(f"{RES}/{st}_state.npz")
+                if str(z["sig"]) == fold_sig:
+                    for ext in (".pt", "_state.npz"):
+                        if os.path.abspath(RES) != os.path.abspath(CFG.OUT_DIR): shutil.copy(f"{RES}/{st}{ext}", f"{CFG.OUT_DIR}/{st}{ext}")
+                    ARMS[arm]["oof"][folds == f] = z["oof"]
+                    if not CFG.INCLUDE_GOLD: ARMS[arm]["gold"].append(z["gold"])
+                    ARMS[arm]["files"].append(f"{CFG.OUT_DIR}/{st}.pt"); print("resumed", st); continue
+                print(f"!! {st}: stored folds differ from this run's folds (labels/seed changed); retraining")
+            trained = True; seed_all(CFG.SEED + f + 100 * arm_i)
+            tr = pool[folds != f]
             model = make_model(backbone, CFG.PRETRAINED).to(DEVICE).to(memory_format=torch.channels_last)
             if N_GPU > 1: model = nn.DataParallel(model)
             core = model.module if hasattr(model, "module") else model
@@ -600,16 +622,17 @@ if CFG.MODE == "train":
                 loss = train_epoch(model, dl, opt, sched, scaler, ema)
                 print(f"[{arm} {backbone}] fold {f} ep {ep + 1}/{CFG.EPOCHS} loss {loss:.4f}  {elapsed()}")
             if ema is not None: core.load_state_dict(ema.state_dict(core.state_dict()))   # evaluate and save the EMA weights
-            pv = predict(model, loader(va)); yv = Ypool[folds == f]
-            ARMS[arm]["oof"][folds == f] = fill_nan(pv, prev)
-            print(f"== [{arm}] fold {f}: OOF macroAUC vs report labels {macro_auc((yv >= 0.5).astype(int), fill_nan(pv, prev), yv != 0.5):.4f}")
+            pv = fill_nan(predict(model, loader(va)), prev); yv = Ypool[folds == f]
+            ARMS[arm]["oof"][folds == f] = pv
+            print(f"== [{arm}] fold {f}: OOF macroAUC vs report labels {macro_auc((yv >= 0.5).astype(int), pv, yv != 0.5):.4f}")
+            gp = np.zeros(1)
             if not CFG.INCLUDE_GOLD:
                 gp = fill_nan(predict(model, loader(gold)), prev); ARMS[arm]["gold"].append(gp)
                 print(f"   expert-set macroAUC (this fold model): {macro_auc(Yg, gp):.4f}")
-            fn = f"{CFG.OUT_DIR}/{arm}_fold{f}.pt"; torch.save(core.state_dict(), fn); ARMS[arm]["files"].append(fn)
-            fold_times.append(time.time() - t)
+            fn = f"{CFG.OUT_DIR}/{st}.pt"; torch.save(core.state_dict(), fn); ARMS[arm]["files"].append(fn)
+            np.savez(f"{CFG.OUT_DIR}/{st}_state.npz", oof=pv, gold=gp, sig=fold_sig)
             del model, core, opt, dl; torch.cuda.empty_cache()
-        if stop: break
+        if trained: fold_times.append(time.time() - t_fold)
     cfg_dump = {k: v for k, v in vars(CFG).items() if not k.startswith("_") and isinstance(v, (int, float, str, list, tuple, bool, type(None)))}
     cfg_dump["arms"] = {a: dict(backbone=v["backbone"], files=[os.path.basename(x) for x in v["files"]],
                                 sha256=[sha256(x) for x in v["files"]]) for a, v in ARMS.items()}
@@ -677,6 +700,11 @@ if CFG.MODE == "train":
         summary.update({"gold_macro_auc_fused": macro_auc(Yg, G), "gold_auc_95ci": list(np.nanpercentile(boots, [2.5, 97.5])),
                         "gold_macro_auc_per_arm": {a: macro_auc(Yg, g) for a, g in Gp.items()},
                         "gold_accuracy_LOO_thresholds": acc, "gold_accuracy_all_negative": float((Yg == 0).mean())})
+        lab_acc = float(((candidates[LABEL_SOURCE][gold_mask] >= 0.5).astype(int) == Yg).mean())
+        summary["labeler_as_predictor_gold_accuracy"] = lab_acc
+        print(f"TARGET CHECK  macro accuracy (LOO thresholds) {acc:.4f} | macro AUC {summary['gold_macro_auc_fused']:.4f} | "
+              f"99% target {'REACHED' if acc >= 0.99 else 'NOT reached'} | always-negative floor {summary['gold_accuracy_all_negative']:.4f} | "
+              f"accuracy of the training labels themselves vs expert labels {lab_acc:.4f} (what the model is taught from)")
         per = pd.DataFrame({"gold_auc": [macro_auc(Yg[:, k:k + 1], G[:, k:k + 1]) for k in range(12)], "gold_acc_LOO": acc_lab,
                             "oof_auc": [macro_auc(yb[:, k:k + 1], fused_oof[:, k:k + 1], Ypool[done, k:k + 1] != 0.5) for k in range(12)]},
                            index=LABELS).round(4)
@@ -725,9 +753,38 @@ sub.to_csv("submission.csv", index=False)
 print(f"submission.csv: {sub.shape} | total {elapsed()}")
 sub.head()"""))
 
-nb = nbf.v4.new_notebook(cells=C)
-nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-nb.metadata["kaggle"] = {"accelerator": "gpu", "isInternetEnabled": True, "language": "python"}
-out = ROOT / "notebooks/rsna_knee_kaggle_v2.ipynb"
-nbf.write(nb, out)
-print("wrote", out)
+MAX_INTRO = md(r"""# RSNA Knee: maximum-accuracy configuration (`PRESET = "ultra"`)
+
+This is the same notebook as `rsna_knee_kaggle_v2` with every setting pushed toward accuracy and away from speed:
+384 px, 96 slices, 48 windows per study, a CoAtNet (the Raptor backbone) plus a ConvNeXt-small arm fused on
+out-of-fold predictions, 8 epochs, EMA 0.999, a 3-layer transformer, mirror TTA, and the LLM labeler switched on.
+
+## About the 99 % target
+**99 % macro accuracy is a target, not something this notebook can promise, and the notebook will not claim it.** What it
+does is print a `TARGET CHECK` line with the measured number next to the references that bound it:
+* the **always-negative floor** on the 58 expert studies (about 0.65-0.71), and
+* the **accuracy of the training labels themselves** against the expert labels: the model is taught from report-derived
+  labels, so this number is an upper-bound indicator. In the author's study the rule labels reach only 0.735 AUC against
+  the experts, and the best public notebooks (about 0.95 AUC on the leaderboard) used LLM labels plus extra data.
+* With 58 expert studies one error in one label moves accuracy by 0.14 %, and the AUC 95 % CI is about ±0.06, so
+  "99 %" cannot even be *verified* on that set with statistical confidence.
+
+## Two-run protocol (recommended)
+1. **Run A (evaluation):** `INCLUDE_GOLD = False`. Trains on report labels only and reports honest expert-set metrics.
+2. **Run B (submission):** `INCLUDE_GOLD = True`, `RESUME_DIR = None`. Adds the 58 expert studies to training; no expert-set
+   metric is valid afterwards. Use Run A's numbers to describe Run B's expected quality.
+
+## Time
+The `ultra` preset is heavy. On a Kaggle T4x2 only a few folds will fit in the 8.6 h budget (an estimate, not a
+measurement). Training is **fold-major** so every finished fold has both arms, per-fold checkpoints and OOF state are
+saved, and a later session can continue: attach this run's output as a dataset and set `RESUME_DIR` to its path.
+A faster GPU (A100/H100) lets all five folds finish.""")
+
+for name, preset, cells in (("rsna_knee_kaggle_v2", "balanced", C), ("rsna_knee_kaggle_max", "ultra", [MAX_INTRO] + C)):
+    cs = [nbf.v4.new_code_cell(c.source.replace('PRESET = "balanced"', f'PRESET = "{preset}"')) if c.cell_type == "code" else c for c in cells]
+    nb = nbf.v4.new_notebook(cells=cs)
+    nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
+    nb.metadata["kaggle"] = {"accelerator": "gpu", "isInternetEnabled": True, "language": "python"}
+    out = ROOT / f"notebooks/{name}.ipynb"
+    nbf.write(nb, out)
+    print("wrote", out)

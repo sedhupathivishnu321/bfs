@@ -541,3 +541,14 @@ dataset; train, infer and `INCLUDE_GOLD` modes run end to end, the infer run rep
 exactly, and unit checks cover the window table, mirror and augmentation. Accuracy on the real data is unmeasured,
 and the run-time presets are estimates. Label quality (rule labels reach 0.735 AUC against the expert set) still
 limits what any image model can reach; use `USE_LLM_LABELS=True` for the largest expected gain.
+
+### 11.1 Maximum-accuracy notebook
+
+[`notebooks/rsna_knee_kaggle_max.ipynb`](notebooks/rsna_knee_kaggle_max.ipynb) is the same code with `PRESET="ultra"`:
+384 px, 48 windows per study, CoAtNet (`coatnet_rmlp_2_rw_384`) + ConvNeXt-small arms fused on OOF, 3-layer transformer,
+EMA 0.999, 8 epochs, LLM labeler on (it falls back to rules with a warning if no model is attached). Training is
+fold-major with per-fold checkpoints, so a later session can continue via `RESUME_DIR`. The notebook prints a
+`TARGET CHECK` line: measured macro accuracy against the 99 % target, the always-negative floor and the accuracy of the
+training labels themselves. **99 % is a target, not a result**; nothing has been run on the real data. Smoke tests on
+synthetic data pass for train, infer, `INCLUDE_GOLD` and resume (the resumed run reproduces the original submission).
+
