@@ -63,11 +63,14 @@ class CFG:
     MODE = "train"                 # "train" (train+eval+submit) | "infer" (load WEIGHTS_DIR, submit only)
     PRESET = "balanced"            # "fast" | "balanced" | "max" | "custom" (keep the values below)
     SEED = 42
+    AUTO_FIT_TIME = True           # benchmark a few training steps, then shrink epochs / folds so training fits the budget
+    MIN_EPOCHS = 4                 # the fitter keeps at least this many epochs per fold before it drops folds
+    LOG_EVERY = 50                 # print step speed, ETA, host RAM and GPU memory every N steps
     TIME_BUDGET_H = 8.5            # stop starting new folds when the next one would not finish inside this budget
     INFER_RESERVE_MIN = 25         # time kept for test inference
     # ---- data ----
     DATA_DIR = None                # None -> auto-detect under /kaggle/input
-    CACHE_DIR = "/kaggle/temp/cache" if os.path.isdir("/kaggle/temp") else "/kaggle/working/cache"
+    CACHE_DIR = None               # None -> the writable place with the most free disk among /kaggle/temp, /tmp, /kaggle/working
     OUT_DIR = "/kaggle/working"
     WEIGHTS_DIR = "/kaggle/input/knee-v2-weights"       # used when MODE == "infer"
     AUTO_FIT_DISK = True           # lower IMG automatically if the cache would not fit on disk
@@ -141,6 +144,14 @@ if os.environ.get("KNEE_SMOKE") == "1":   # used only by the author's CPU smoke 
     CFG.NUM_WORKERS, CFG.AMP, CFG.EMA, CFG.TF_DEPTH, CFG.AUTO_FIT_DISK = 0, False, 0.9, 1, False
     CFG.MODE = os.environ.get("KNEE_MODE", "train"); CFG.WEIGHTS_DIR = os.environ.get("KNEE_WEIGHTS", CFG.OUT_DIR)
 CFG.TOTAL = sum(s[2] for s in CFG.SLOTS)
+if CFG.CACHE_DIR is None:
+    _opts = []
+    for _d in ("/kaggle/temp", "/tmp", "/kaggle/working"):
+        try:
+            os.makedirs(_d, exist_ok=True); _opts.append((shutil.disk_usage(_d).free, _d))
+        except Exception: pass
+    print("free disk:", {d: f"{f / 1e9:.0f} GB" for f, d in _opts})
+    CFG.CACHE_DIR = os.path.join(max(_opts)[1], "cache")
 os.makedirs(CFG.CACHE_DIR, exist_ok=True); os.makedirs(CFG.OUT_DIR, exist_ok=True)
 print({k: v for k, v in vars(CFG).items() if not k.startswith("_")})"""))
 
@@ -632,20 +643,36 @@ def forward_batch(model, b, train, mirror_flag=False):
     with torch.autocast(device_type=DEVICE.type, dtype=torch.float16, enabled=CFG.AMP and DEVICE.type == "cuda"):
         return model(x, slot, pos, wv)
 
-def train_epoch(model, loader, opt, sched, scaler, ema):
-    model.train(); tot, n = 0.0, 0
-    for b in loader:
-        y = b["y"].to(DEVICE)
-        mir = CFG.MIRROR_AUG and random.random() < 0.5
-        z, zg, zl = forward_batch(model, b, True, mir)
-        bce = lambda t: F.binary_cross_entropy_with_logits(t.float(), y)
-        loss = bce(z) + CFG.AUX_W * (bce(zg) + bce(zl))
-        opt.zero_grad(set_to_none=True)
-        scaler.scale(loss).backward(); scaler.unscale_(opt)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.CLIP)
-        scaler.step(opt); scaler.update(); sched.step()
+def mem_report():
+    out = []
+    try:
+        import psutil; vm = psutil.virtual_memory(); out.append(f"host RAM {vm.used / 1e9:.1f}/{vm.total / 1e9:.1f} GB")
+        if vm.available < 2e9: out.append("!! LOW HOST RAM")
+    except Exception: pass
+    if DEVICE.type == "cuda":
+        out.append("GPU peak " + "/".join(f"{torch.cuda.max_memory_allocated(i) / 1e9:.1f}" for i in range(N_GPU)) + " GB")
+    return " | ".join(out)
+
+def train_step(model, b, opt, scaler):
+    y = b["y"].to(DEVICE)
+    z, zg, zl = forward_batch(model, b, True, CFG.MIRROR_AUG and random.random() < 0.5)
+    bce = lambda t: F.binary_cross_entropy_with_logits(t.float(), y)
+    loss = bce(z) + CFG.AUX_W * (bce(zg) + bce(zl))
+    opt.zero_grad(set_to_none=True)
+    scaler.scale(loss).backward(); scaler.unscale_(opt)
+    torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.CLIP)
+    scaler.step(opt); scaler.update()
+    return loss.item(), len(y)
+
+def train_epoch(model, loader, opt, sched, scaler, ema, tag=""):
+    model.train(); tot, n, t0 = 0.0, 0, time.time()
+    for i, b in enumerate(loader):
+        l, m = train_step(model, b, opt, scaler); sched.step()
         if ema is not None: ema.update(model.module if hasattr(model, "module") else model)
-        tot += loss.item() * len(y); n += len(y)
+        tot += l * m; n += m
+        if CFG.LOG_EVERY and (i + 1) % CFG.LOG_EVERY == 0:
+            rate = (i + 1) / (time.time() - t0)
+            print(f"  {tag} step {i + 1}/{len(loader)} loss {tot / n:.4f} | {rate:.2f} it/s | epoch ETA {(len(loader) - i - 1) / rate / 60:.1f} min | {mem_report()}", flush=True)
     return tot / max(n, 1)
 
 @torch.no_grad()
@@ -663,8 +690,8 @@ def predict(model, loader, tta=None):
 def loader(idx, y=None, train=False):
     ds = KneeDS(VOL, MASK, idx, y, train)
     return torch.utils.data.DataLoader(ds, batch_size=CFG.BATCH if train else max(1, CFG.BATCH), shuffle=train,
-                                       num_workers=CFG.NUM_WORKERS, pin_memory=True, drop_last=train,
-                                       persistent_workers=CFG.NUM_WORKERS > 0)
+                                       num_workers=min(CFG.NUM_WORKERS, os.cpu_count() or 1), pin_memory=DEVICE.type == "cuda", drop_last=train,
+                                       persistent_workers=train and CFG.NUM_WORKERS > 0)
 
 def fill_nan(P, prev): return np.where(np.isnan(P), prev[None], P)
 
@@ -680,6 +707,35 @@ if CFG.MODE == "train":
     folds = np.zeros(len(pool), int)
     for f, (_, te) in enumerate(StratifiedKFold(CFG.FOLDS, shuffle=True, random_state=CFG.SEED).split(pool, strat)):
         folds[te] = f
+    # ---- measure real speed, then fit epochs / folds into the time budget (the presets' speed numbers are only estimates) ----
+    def benchmark_arm(backbone, n_warm=2, n_meas=8):
+        tr = pool[folds != 0][:CFG.BATCH * (n_warm + n_meas + 1)]
+        model = make_model(backbone, CFG.PRETRAINED).to(DEVICE).to(memory_format=torch.channels_last)
+        if N_GPU > 1: model = nn.DataParallel(model)
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-6); scaler = torch.amp.GradScaler(enabled=CFG.AMP and DEVICE.type == "cuda")
+        model.train(); ts = []
+        for i, b in enumerate(loader(tr, Ypool[folds != 0][:len(tr)], train=True)):
+            t = time.time(); train_step(model, b, opt, scaler)
+            if DEVICE.type == "cuda": torch.cuda.synchronize()
+            ts.append(time.time() - t)
+            if len(ts) >= n_warm + n_meas: break
+        r = float(np.mean(ts[n_warm:])); print(f"  benchmark {backbone}: {r:.2f} s/step (batch {CFG.BATCH} studies x {CFG.TRAIN_WINDOWS} windows) | {mem_report()}")
+        del model, opt; torch.cuda.empty_cache(); return r
+    if CFG.AUTO_FIT_TIME:
+        step_s = sum(benchmark_arm(b) for b in CFG.BACKBONES)                      # one step of every arm
+        epoch_cost = step_s * ((len(pool) - len(pool) // CFG.FOLDS) // CFG.BATCH)   # seconds for one epoch of all arms
+        budget = CFG.TIME_BUDGET_H * 3600 - (time.time() - T0) - CFG.INFER_RESERVE_MIN * 60
+        EVAL_EPOCH_EQ = 0.6                                                       # val + expert-set prediction with TTA, in epochs
+        plan = None
+        for nf in range(min(CFG.FOLDS, len(CFG.TRAIN_FOLDS)), 0, -1):
+            e = int(budget / nf / epoch_cost - EVAL_EPOCH_EQ)
+            if e >= CFG.MIN_EPOCHS: plan = (nf, min(e, CFG.EPOCHS)); break
+        fits = plan is not None
+        if plan is None: plan = (1, max(1, min(CFG.EPOCHS, int(budget / epoch_cost - EVAL_EPOCH_EQ))))
+        print(f"time plan: one epoch of all arms = {epoch_cost / 60:.1f} min; budget {budget / 3600:.1f} h -> {plan[0]} fold(s) x {plan[1]} epoch(s) "
+              f"(requested {len(CFG.TRAIN_FOLDS)} x {CFG.EPOCHS})")
+        if not fits: print("!! even one fold cannot get MIN_EPOCHS in this budget: lower IMG / TRAIN_WINDOWS / use a smaller backbone (preset 'fast')")
+        CFG.TRAIN_FOLDS, CFG.EPOCHS = list(CFG.TRAIN_FOLDS)[:plan[0]], plan[1]
     ARMS = {f"a{i}": dict(backbone=b, oof=np.full(Ypool.shape, np.nan, np.float32), gold=[], files=[]) for i, b in enumerate(CFG.BACKBONES)}
     RES = CFG.RESUME_DIR if CFG.RESUME_DIR and os.path.isdir(CFG.RESUME_DIR) else None
     fold_sig = hashlib.md5(folds.tobytes() + np.asarray(pool).tobytes()).hexdigest()
@@ -716,7 +772,7 @@ if CFG.MODE == "train":
             scaler = torch.amp.GradScaler(enabled=CFG.AMP and DEVICE.type == "cuda")
             ema = EMA(core, CFG.EMA) if CFG.EMA else None
             for ep in range(CFG.EPOCHS):
-                loss = train_epoch(model, dl, opt, sched, scaler, ema)
+                loss = train_epoch(model, dl, opt, sched, scaler, ema, tag=f"[{arm} f{f} ep{ep + 1}]")
                 print(f"[{arm} {backbone}] fold {f} ep {ep + 1}/{CFG.EPOCHS} loss {loss:.4f}  {elapsed()}")
             if ema is not None: core.load_state_dict(ema.state_dict(core.state_dict()))   # evaluate and save the EMA weights
             pv = fill_nan(predict(model, loader(va)), prev); yv = Ypool[folds == f]
