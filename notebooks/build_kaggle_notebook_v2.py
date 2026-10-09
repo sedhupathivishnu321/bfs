@@ -58,6 +58,8 @@ leave-one-out thresholds for accuracy.
 C.append(code(r"""# ============================== CONFIG ==============================
 import os, glob, json, math, time, random, warnings, hashlib, shutil
 warnings.filterwarnings("ignore")
+BUILD = "2026-10-09 e: pre-flight, offline weights, auto time-fit, step logging"
+print("notebook build:", BUILD)
 
 class CFG:
     MODE = "train"                 # "train" (train+eval+submit) | "infer" (load WEIGHTS_DIR, submit only)
