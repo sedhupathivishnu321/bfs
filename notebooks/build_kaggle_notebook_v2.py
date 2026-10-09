@@ -111,6 +111,12 @@ class CFG:
     LLM_BATCH = 8
     # ---- output ----
     OUTPUT = "prob"                # "prob" | "rank" (per-column percentile rank of the ensemble)
+    # ---- offline / standalone ----
+    OFFLINE = None                 # None = auto-detect (no internet -> HF_HUB_OFFLINE=1); everything must then come from /kaggle/input
+    BACKBONE_WEIGHTS = {}          # optional explicit {backbone_tag: "/kaggle/input/.../model.safetensors"}
+    WEIGHT_SEARCH_ROOTS = ["/kaggle/input"]
+    ALLOW_RANDOM_INIT = False      # True: if no pretrained file is found offline, train from random weights (much worse)
+    EXPORT_BACKBONES = False       # run ONCE with internet on: saves backbone weights to OUT_DIR/backbone_weights, then stops
     RESUME_DIR = None              # a previous session's output directory (attach it as a dataset) to continue training
     SMOKE = False
     MAX_TRAIN_STUDIES = None       # e.g. 300 for a quick trial
@@ -166,6 +172,97 @@ def sha256(path, n=1 << 20):
     with open(path, "rb") as f:
         while b := f.read(n): h.update(b)
     return h.hexdigest()"""))
+
+C.append(md(r"""## 0. Offline resources and pre-flight check
+
+Everything this notebook needs must exist **inside Kaggle**. Attach (Add Input):
+1. the **competition data**;
+2. for the report labeler: a **Qwen2.5-Instruct** model from *Models* (`qwen-lm/qwen2.5`, Transformers, `3b-instruct` or `7b-instruct`);
+3. pretrained **backbone weights** for each name in `CFG.BACKBONES`. With internet off, timm cannot download them. Create them once
+   with internet on: set `EXPORT_BACKBONES=True`, run, then *Save Version* and use the notebook output
+   (`backbone_weights/*.safetensors`) as a Kaggle dataset, and attach that dataset here. The notebook finds the files by name.
+
+The check below fails **before** the hours-long DICOM caching if something is missing."""))
+C.append(code(r"""import socket
+def _online(host="huggingface.co", port=443, t=3):
+    try:
+        socket.create_connection((host, port), timeout=t).close(); return True
+    except Exception:
+        return False
+OFFLINE = (not _online()) if CFG.OFFLINE is None else bool(CFG.OFFLINE)
+if OFFLINE:
+    os.environ["HF_HUB_OFFLINE"] = os.environ["TRANSFORMERS_OFFLINE"] = "1"
+print("internet:", "OFF -> using only /kaggle/input" if OFFLINE else "ON")
+
+WEIGHT_EXT = (".safetensors", ".bin", ".pth", ".pt")
+def resolve_weights(backbone):
+    # explicit path > file whose path contains the full tag > file whose path contains the architecture name
+    if backbone in CFG.BACKBONE_WEIGHTS: return CFG.BACKBONE_WEIGHTS[backbone]
+    arch, best = backbone.split(".")[0].lower(), (0, None)
+    for rt in CFG.WEIGHT_SEARCH_ROOTS:
+        for root, dirs, files in os.walk(rt):
+            dirs[:] = [d for d in dirs if d not in ("train_series", "test_series") and "qwen" not in d.lower()]
+            for fn in files:
+                low = os.path.join(root, fn).lower()
+                if not low.endswith(WEIGHT_EXT) or "_fold" in low or "optimizer" in low: continue
+                score = 2 if backbone.lower() in low else (1 if arch in low else 0)
+                path = os.path.join(root, fn)
+                if score > best[0] or (score and score == best[0] and len(path) < len(best[1])): best = (score, path)
+    return best[1]
+
+def build_encoder(backbone, pretrained, kw):
+    base = dict(num_classes=0, in_chans=3, **kw)
+    if not pretrained: return timm.create_model(backbone, pretrained=False, **base)
+    path = resolve_weights(backbone)
+    if path:
+        print(f"  pretrained weights for {backbone}: {path}")
+        return timm.create_model(backbone, pretrained=True, pretrained_cfg_overlay=dict(file=path), **base)
+    if not OFFLINE:
+        return timm.create_model(backbone, pretrained=True, **base)
+    if CFG.ALLOW_RANDOM_INIT:
+        print(f"!! no pretrained weights for {backbone}: RANDOM INIT (expect far worse results)")
+        return timm.create_model(backbone, pretrained=False, **base)
+    raise FileNotFoundError(f"No pretrained weights for '{backbone}' under {CFG.WEIGHT_SEARCH_ROOTS} and internet is off. "
+                            f"Set EXPORT_BACKBONES=True once with internet on, save the output as a dataset and attach it, "
+                            f"or set CFG.BACKBONE_WEIGHTS['{backbone}'] to a file path.")
+
+def resolve_llm():
+    if os.path.isdir(CFG.LLM_PATH) and os.path.exists(os.path.join(CFG.LLM_PATH, "config.json")): return CFG.LLM_PATH
+    cands = []
+    for root, dirs, files in os.walk("/kaggle/input"):
+        dirs[:] = [d for d in dirs if d not in ("train_series", "test_series")]
+        if "config.json" in files and "qwen" in root.lower(): cands.append(root)
+    cands.sort(key=lambda r: (("instruct" not in r.lower()), len(r)))
+    return cands[0] if cands else None
+
+if CFG.EXPORT_BACKBONES:
+    assert not OFFLINE, "EXPORT_BACKBONES needs internet ON (to download the weights once)"
+    from safetensors.torch import save_file
+    outd = f"{CFG.OUT_DIR}/backbone_weights"; os.makedirs(outd, exist_ok=True)
+    for b in CFG.BACKBONES:
+        kw = {"img_size": CFG.IMG} if b.startswith(("coatnet", "coat_", "maxvit", "maxxvit", "vit_", "eva", "beit")) else {}
+        m = timm.create_model(b, pretrained=True, num_classes=0, **kw)
+        save_file({k: v.contiguous() for k, v in m.state_dict().items()}, f"{outd}/{b}.safetensors"); print("saved", f"{outd}/{b}.safetensors")
+    raise SystemExit("Backbone weights exported. Save Version, turn the output into a Kaggle dataset, attach it, set EXPORT_BACKBONES=False.")
+
+def preflight():
+    rows, ok = [], True
+    rows.append(("competition data", DATA, True))
+    rows.append(("GPU", f"{N_GPU} x {torch.cuda.get_device_name(0)}" if N_GPU else "none (CPU: far too slow for real runs)", N_GPU > 0 or CFG.SMOKE))
+    if CFG.MODE == "train":
+        for b in CFG.BACKBONES:
+            if not CFG.PRETRAINED: rows.append((f"backbone {b}", "random init (PRETRAINED=False)", True)); continue
+            w = resolve_weights(b); good = bool(w) or not OFFLINE or CFG.ALLOW_RANDOM_INIT
+            rows.append((f"backbone {b}", w or ("download at start (internet on)" if not OFFLINE else "MISSING"), good))
+        if CFG.USE_LLM_LABELS:
+            q = resolve_llm(); rows.append(("Qwen LLM labeler", q or "not found -> rule labels only (warning)", True))
+            if q: CFG.LLM_PATH = q
+    for name, val, good in rows:
+        print(f"[{'ok' if good else 'MISSING'}] {name}: {val}"); ok &= bool(good)
+    free = shutil.disk_usage(CFG.CACHE_DIR).free / 1e9
+    print(f"[info] free disk for the DICOM cache: {free:.0f} GB | time budget {CFG.TIME_BUDGET_H} h")
+    if not ok: raise RuntimeError("Pre-flight failed: attach the missing inputs listed above (see section 0).")
+preflight()"""))
 
 C.append(md("## 1. Multilingual rule labeler (embedded, unchanged from v1)"))
 C.append(code("%%writefile knee_labeler.py\n" + LABELER_SRC))
@@ -473,7 +570,7 @@ class Knee25DMIL(nn.Module):
         super().__init__()
         kw = {"drop_path_rate": drop_path} if drop_path else {}
         if backbone.startswith(("coatnet", "coat_", "maxvit", "maxxvit", "vit_", "eva", "beit")): kw["img_size"] = CFG.IMG
-        self.enc = timm.create_model(backbone, pretrained=pretrained, num_classes=0, in_chans=3, **kw)
+        self.enc = build_encoder(backbone, pretrained, kw)
         if grad_ckpt and hasattr(self.enc, "set_grad_checkpointing"): self.enc.set_grad_checkpointing(True)
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1), persistent=False)
@@ -753,7 +850,11 @@ sub.to_csv("submission.csv", index=False)
 print(f"submission.csv: {sub.shape} | total {elapsed()}")
 sub.head()"""))
 
-MAX_INTRO = md(r"""# RSNA Knee: maximum-accuracy configuration (`PRESET = "ultra"`)
+MAX_INTRO = md(r"""# RSNA Knee Abnormality Detection: standalone maximum-accuracy notebook (`PRESET = "ultra"`)
+
+**Standalone:** one file, no repository, no pip installs, no internet needed. The multilingual report labeler is embedded; the competition data,
+a Qwen2.5-Instruct model and the pretrained backbone weights come from `/kaggle/input` (see section 0 for exactly what to attach and
+how to create the backbone-weights dataset once). A pre-flight cell checks all of it before any slow step.
 
 This is the same notebook as `rsna_knee_kaggle_v2` with every setting pushed toward accuracy and away from speed:
 384 px, 96 slices, 48 windows per study, a CoAtNet (the Raptor backbone) plus a ConvNeXt-small arm fused on
@@ -780,7 +881,7 @@ measurement). Training is **fold-major** so every finished fold has both arms, p
 saved, and a later session can continue: attach this run's output as a dataset and set `RESUME_DIR` to its path.
 A faster GPU (A100/H100) lets all five folds finish.""")
 
-for name, preset, cells in (("rsna_knee_kaggle_v2", "balanced", C), ("rsna_knee_kaggle_max", "ultra", [MAX_INTRO] + C)):
+for name, preset, cells in (("rsna_knee_kaggle_v2", "balanced", C), ("rsna_knee_kaggle_standalone", "ultra", [MAX_INTRO] + C)):
     cs = [nbf.v4.new_code_cell(c.source.replace('PRESET = "balanced"', f'PRESET = "{preset}"')) if c.cell_type == "code" else c for c in cells]
     nb = nbf.v4.new_notebook(cells=cs)
     nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}

@@ -542,13 +542,14 @@ exactly, and unit checks cover the window table, mirror and augmentation. Accura
 and the run-time presets are estimates. Label quality (rule labels reach 0.735 AUC against the expert set) still
 limits what any image model can reach; use `USE_LLM_LABELS=True` for the largest expected gain.
 
-### 11.1 Maximum-accuracy notebook
+### 11.1 Standalone maximum-accuracy notebook
 
-[`notebooks/rsna_knee_kaggle_max.ipynb`](notebooks/rsna_knee_kaggle_max.ipynb) is the same code with `PRESET="ultra"`:
-384 px, 48 windows per study, CoAtNet (`coatnet_rmlp_2_rw_384`) + ConvNeXt-small arms fused on OOF, 3-layer transformer,
-EMA 0.999, 8 epochs, LLM labeler on (it falls back to rules with a warning if no model is attached). Training is
-fold-major with per-fold checkpoints, so a later session can continue via `RESUME_DIR`. The notebook prints a
-`TARGET CHECK` line: measured macro accuracy against the 99 % target, the always-negative floor and the accuracy of the
-training labels themselves. **99 % is a target, not a result**; nothing has been run on the real data. Smoke tests on
-synthetic data pass for train, infer, `INCLUDE_GOLD` and resume (the resumed run reproduces the original submission).
-
+[`notebooks/rsna_knee_kaggle_standalone.ipynb`](notebooks/rsna_knee_kaggle_standalone.ipynb) is one file with no repository,
+pip or internet dependency (the report labeler is embedded). It is the v2 code with `PRESET="ultra"`: 384 px, 48 windows per
+study, CoAtNet (`coatnet_rmlp_2_rw_384`) + ConvNeXt-small arms fused on OOF, 3-layer transformer, EMA 0.999, 8 epochs, LLM labeler on.
+Everything comes from `/kaggle/input`: the competition data, a Qwen2.5-Instruct model (found automatically) and the backbone
+weights (found by name; create them once with `EXPORT_BACKBONES=True` and attach the output as a dataset). A pre-flight cell
+fails before the slow DICOM caching if anything is missing. Training is fold-major with per-fold checkpoints and `RESUME_DIR`.
+The notebook prints a `TARGET CHECK` line (measured macro accuracy vs the 99 % target, the always-negative floor, and the accuracy
+of the training labels). **99 % is a target, not a result**; nothing has been run on the real data. Smoke tests on synthetic data
+pass for train, infer, `INCLUDE_GOLD`, resume, weight export and offline weight loading.
